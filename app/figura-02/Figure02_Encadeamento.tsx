@@ -178,7 +178,60 @@ function useRerouteOnResize(refs: Array<React.RefObject<Element | null>>, onResi
       observer.disconnect();
       window.removeEventListener('resize', schedule);
     };
-  }, [refs, onResize]);
+  }, [onResize]);
+}
+
+// Compute a dynamic merge point for multiple sources going into one target.
+// The merge X is placed a fixed gap to the left of the target; the merge Y
+// is the average of source centerlines, clamped within the target band.
+function useMergePoint(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  sourceRefs: Array<React.RefObject<HTMLElement | null>>,
+  targetRef: React.RefObject<HTMLElement | null>,
+  xGap: number = 60,
+): { x: number; y: number } {
+  const [pt, setPt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Hold latest sourceRefs to avoid recreating callbacks/effects on each render
+  const sourceRefsRef = useRef(sourceRefs);
+  useEffect(() => {
+    sourceRefsRef.current = sourceRefs;
+  }, [sourceRefs]);
+
+  const update = useCallback(() => {
+    const container = containerRef.current;
+    const target = targetRef.current;
+    if (!container || !target) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+
+    const centers: number[] = [];
+    for (const r of sourceRefsRef.current) {
+      const el = r.current;
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      centers.push(rect.top + rect.height / 2 - containerRect.top);
+    }
+    // Fallback to target center if sources not ready
+    const avgY =
+      centers.length > 0
+        ? centers.reduce((a, b) => a + b, 0) / centers.length
+        : targetRect.top + targetRect.height / 2 - containerRect.top;
+
+    const targetTop = targetRect.top - containerRect.top;
+    const targetBottom = targetTop + targetRect.height;
+    // Keep the merge Y within the vertical band near the target for pleasant curves
+    const y = Math.max(targetTop + targetRect.height * 0.2, Math.min(avgY, targetBottom - targetRect.height * 0.2));
+    const x = Math.max(0, targetRect.left - containerRect.left - xGap);
+    setPt({ x, y });
+  }, [containerRef, targetRef, xGap]);
+
+  useEffect(() => {
+    update();
+  }, [update]);
+
+  useRerouteOnResize([containerRef, targetRef, ...sourceRefsRef.current], update);
+  return pt;
 }
 
 function useCurvedConnector(
@@ -451,33 +504,42 @@ export default function Figure02_Encadeamento(): React.ReactElement {
     },
   ];
 
-  // VARIABLES → INDICATORS (Direct curved connections with vertical offsets)
-  // Rs, T, UR, u₂, P → ET₀ (5 inputs with spread)
-  const pathRsToEt0 = useCurvedConnector(containerRef, rsRef, et0Ref, { fromOffset: -50, toOffset: -40 });
-  const pathTempToEt0 = useCurvedConnector(containerRef, tempRef, et0Ref, { fromOffset: -25, toOffset: -20 });
-  const pathUrToEt0 = useCurvedConnector(containerRef, umidadeRef, et0Ref, { fromOffset: 0, toOffset: 0 });
-  const pathVentoToEt0 = useCurvedConnector(containerRef, ventoRef, et0Ref, { fromOffset: 25, toOffset: 20 });
-  const pathPressToEt0 = useCurvedConnector(containerRef, pressaoRef, et0Ref, { fromOffset: 50, toOffset: 40 });
-  
+  // Compute merge points for groups that share a common target
+  const mergeEt0 = useMergePoint(containerRef, [rsRef, tempRef, umidadeRef, ventoRef, pressaoRef], et0Ref, 70);
+  const mergeBh = useMergePoint(containerRef, [precipitacaoRef, armazenamentoRef, et0Ref], bhRef, 70);
+  const mergeD1 = useMergePoint(containerRef, [et0Ref, bhRef], d1Ref, 70);
+  const mergeD3 = useMergePoint(containerRef, [et0Ref, gddRef], d3Ref, 70);
+
+  // VARIABLES → INDICATORS (with merge into a single arrow per target)
+  // Sources to merge for ET₀
+  const pathRsToEt0Merge = useMergeConnector(containerRef, rsRef, et0Ref, mergeEt0.x, mergeEt0.y, -40, false);
+  const pathTempToEt0Merge = useMergeConnector(containerRef, tempRef, et0Ref, mergeEt0.x, mergeEt0.y, -20, false);
+  const pathUrToEt0Merge = useMergeConnector(containerRef, umidadeRef, et0Ref, mergeEt0.x, mergeEt0.y, 0, false);
+  const pathVentoToEt0Merge = useMergeConnector(containerRef, ventoRef, et0Ref, mergeEt0.x, mergeEt0.y, 20, false);
+  const pathPressToEt0Merge = useMergeConnector(containerRef, pressaoRef, et0Ref, mergeEt0.x, mergeEt0.y, 40, false);
+  // Single arrow from merge to ET₀ target
+  const pathMergeToEt0 = useMergeConnector(containerRef, et0Ref, et0Ref, mergeEt0.x, mergeEt0.y, 0, true);
+
   // T → GDD (single connection)
   const pathTempToGdd = useCurvedConnector(containerRef, tempRef, gddRef, { fromOffset: 60, toOffset: -30 });
   
-  // Pcp, ΔS, ET₀ → BH (3 inputs with spread)
-  const pathPcpToBh = useCurvedConnector(containerRef, precipitacaoRef, bhRef, { fromOffset: -20, toOffset: -25 });
-  const pathSoloToBh = useCurvedConnector(containerRef, armazenamentoRef, bhRef, { fromOffset: 20, toOffset: 25 });
-  const pathEt0ToBh = useCurvedConnector(containerRef, et0Ref, bhRef, { fromOffset: 30, toOffset: 0 });
+  // Pcp, ΔS, ET₀ → BH (merge then single arrow)
+  const pathPcpToBhMerge = useMergeConnector(containerRef, precipitacaoRef, bhRef, mergeBh.x, mergeBh.y, -15, false);
+  const pathSoloToBhMerge = useMergeConnector(containerRef, armazenamentoRef, bhRef, mergeBh.x, mergeBh.y, 15, false);
+  const pathEt0ToBhMerge = useMergeConnector(containerRef, et0Ref, bhRef, mergeBh.x, mergeBh.y, 0, false);
+  const pathMergeToBh = useMergeConnector(containerRef, bhRef, bhRef, mergeBh.x, mergeBh.y, 0, true);
   
   // INDICATORS → DECISIONS
-  // ET₀ → Decisão de Irrigação (top to top, direct path)
-  const pathEt0ToD1 = useCurvedConnector(containerRef, et0Ref, d1Ref, { fromOffset: -25, toOffset: -30 });
-  // BH → Decisão de Irrigação (middle to top, upward)
-  const pathBhToD1 = useCurvedConnector(containerRef, bhRef, d1Ref, { fromOffset: -15, toOffset: 30 });
-  // GDD → Manejo Fitossanitário (bottom to middle)
+  // Merge ET₀ + BH → D1 (single final arrow)
+  const pathEt0ToD1Merge = useMergeConnector(containerRef, et0Ref, d1Ref, mergeD1.x, mergeD1.y, -10, false);
+  const pathBhToD1Merge = useMergeConnector(containerRef, bhRef, d1Ref, mergeD1.x, mergeD1.y, 10, false);
+  const pathMergeToD1 = useMergeConnector(containerRef, d1Ref, d1Ref, mergeD1.x, mergeD1.y, 0, true);
+  // GDD → Manejo Fitossanitário (bottom to middle) remains direct
   const pathGddToD2 = useCurvedConnector(containerRef, gddRef, d2Ref, { fromOffset: -20, toOffset: 0 });
-  // ET₀ → Planejamento Operacional (top to bottom, wide arc to avoid crossing BH→D1)
-  const pathEt0ToD3 = useCurvedConnector(containerRef, et0Ref, d3Ref, { fromOffset: 25, toOffset: -30 });
-  // GDD → Planejamento Operacional (bottom to bottom)
-  const pathGddToD3 = useCurvedConnector(containerRef, gddRef, d3Ref, { fromOffset: 30, toOffset: 30 });
+  // Merge ET₀ + GDD → D3 (single final arrow)
+  const pathEt0ToD3Merge = useMergeConnector(containerRef, et0Ref, d3Ref, mergeD3.x, mergeD3.y, -10, false);
+  const pathGddToD3Merge = useMergeConnector(containerRef, gddRef, d3Ref, mergeD3.x, mergeD3.y, 10, false);
+  const pathMergeToD3 = useMergeConnector(containerRef, d3Ref, d3Ref, mergeD3.x, mergeD3.y, 0, true);
 
 
   useEffect(() => {
@@ -490,44 +552,51 @@ export default function Figure02_Encadeamento(): React.ReactElement {
   const connectors = useMemo(
     () =>
       [
-        // STEP 1: Variables → Indicators
-        // Variables → ET₀ (FAO-56 inputs)
-        { id: 'rs-et0', d: pathRsToEt0, color: COLORS.accent, width: 1.8, title: 'Rs → ET₀' },
-        { id: 'temp-et0', d: pathTempToEt0, color: COLORS.accent, width: 1.8, title: 'T → ET₀' },
-        { id: 'ur-et0', d: pathUrToEt0, color: COLORS.accent, width: 1.8, title: 'UR → ET₀' },
-        { id: 'vento-et0', d: pathVentoToEt0, color: COLORS.accent, width: 1.8, title: 'u₂ → ET₀' },
-        { id: 'press-et0', d: pathPressToEt0, color: COLORS.accent, width: 1.8, title: 'P → ET₀' },
+        // STEP 1: Variables → Indicators (merge to single arrow)
+        { id: 'rs-et0-merge', d: pathRsToEt0Merge, color: COLORS.accent, width: 1.8, title: 'Rs → merge(ET₀)', arrow: false },
+        { id: 'temp-et0-merge', d: pathTempToEt0Merge, color: COLORS.accent, width: 1.8, title: 'T → merge(ET₀)', arrow: false },
+        { id: 'ur-et0-merge', d: pathUrToEt0Merge, color: COLORS.accent, width: 1.8, title: 'UR → merge(ET₀)', arrow: false },
+        { id: 'vento-et0-merge', d: pathVentoToEt0Merge, color: COLORS.accent, width: 1.8, title: 'u₂ → merge(ET₀)', arrow: false },
+        { id: 'press-et0-merge', d: pathPressToEt0Merge, color: COLORS.accent, width: 1.8, title: 'P → merge(ET₀)', arrow: false },
+        { id: 'merge-et0', d: pathMergeToEt0, color: COLORS.accent, width: 1.8, title: 'Merge → ET₀', arrow: true },
         
         // T → GDD (phenology indicator)
-        { id: 'temp-gdd', d: pathTempToGdd, color: COLORS.accent, width: 1.8, title: 'T → GDD' },
+        { id: 'temp-gdd', d: pathTempToGdd, color: COLORS.accent, width: 1.8, title: 'T → GDD', arrow: true },
         
-        // Variables → BH (water balance)
-        { id: 'pcp-bh', d: pathPcpToBh, color: COLORS.accent, width: 1.8, title: 'Pcp → BH' },
-        { id: 'solo-bh', d: pathSoloToBh, color: COLORS.accent, width: 1.8, title: 'ΔS → BH' },
-        { id: 'et0-bh', d: pathEt0ToBh, color: COLORS.accent, width: 1.8, title: 'ET₀ → BH' },
+        // Variables → BH (water balance, merged)
+        { id: 'pcp-bh-merge', d: pathPcpToBhMerge, color: COLORS.accent, width: 1.8, title: 'Pcp → merge(BH)', arrow: false },
+        { id: 'solo-bh-merge', d: pathSoloToBhMerge, color: COLORS.accent, width: 1.8, title: 'ΔS → merge(BH)', arrow: false },
+        { id: 'et0-bh-merge', d: pathEt0ToBhMerge, color: COLORS.accent, width: 1.8, title: 'ET₀ → merge(BH)', arrow: false },
+        { id: 'merge-bh', d: pathMergeToBh, color: COLORS.accent, width: 1.8, title: 'Merge → BH', arrow: true },
         
-        // STEP 2: Indicators → Decisions
-        { id: 'et0-d1', d: pathEt0ToD1, color: COLORS.accent2, width: 1.8, title: 'ET₀ → Decisão Irrigação' },
-        { id: 'bh-d1', d: pathBhToD1, color: COLORS.accent2, width: 1.8, title: 'BH → Decisão Irrigação' },
-        { id: 'gdd-d2', d: pathGddToD2, color: COLORS.accent2, width: 1.8, title: 'GDD → Manejo Fitossanitário' },
-        { id: 'et0-d3', d: pathEt0ToD3, color: COLORS.accent2, width: 1.8, title: 'ET₀ → Planejamento' },
-        { id: 'gdd-d3', d: pathGddToD3, color: COLORS.accent2, width: 1.8, title: 'GDD → Planejamento' },
+        // STEP 2: Indicators → Decisions (merged)
+        { id: 'et0-d1-merge', d: pathEt0ToD1Merge, color: COLORS.accent2, width: 1.8, title: 'ET₀ → merge(D1)', arrow: false },
+        { id: 'bh-d1-merge', d: pathBhToD1Merge, color: COLORS.accent2, width: 1.8, title: 'BH → merge(D1)', arrow: false },
+        { id: 'merge-d1', d: pathMergeToD1, color: COLORS.accent2, width: 1.8, title: 'Merge → Decisão Irrigação', arrow: true },
+        { id: 'gdd-d2', d: pathGddToD2, color: COLORS.accent2, width: 1.8, title: 'GDD → Manejo Fitossanitário', arrow: true },
+        { id: 'et0-d3-merge', d: pathEt0ToD3Merge, color: COLORS.accent2, width: 1.8, title: 'ET₀ → merge(D3)', arrow: false },
+        { id: 'gdd-d3-merge', d: pathGddToD3Merge, color: COLORS.accent2, width: 1.8, title: 'GDD → merge(D3)', arrow: false },
+        { id: 'merge-d3', d: pathMergeToD3, color: COLORS.accent2, width: 1.8, title: 'Merge → Planejamento', arrow: true },
       ].filter((connector) => connector.d),
     [
-      pathRsToEt0,
-      pathTempToEt0,
-      pathUrToEt0,
-      pathVentoToEt0,
-      pathPressToEt0,
+      pathRsToEt0Merge,
+      pathTempToEt0Merge,
+      pathUrToEt0Merge,
+      pathVentoToEt0Merge,
+      pathPressToEt0Merge,
+      pathMergeToEt0,
       pathTempToGdd,
-      pathPcpToBh,
-      pathSoloToBh,
-      pathEt0ToBh,
-      pathEt0ToD1,
-      pathBhToD1,
+      pathPcpToBhMerge,
+      pathSoloToBhMerge,
+      pathEt0ToBhMerge,
+      pathMergeToBh,
+      pathEt0ToD1Merge,
+      pathBhToD1Merge,
+      pathMergeToD1,
       pathGddToD2,
-      pathEt0ToD3,
-      pathGddToD3,
+      pathEt0ToD3Merge,
+      pathGddToD3Merge,
+      pathMergeToD3,
     ],
   );
 
@@ -619,9 +688,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                 fill="none"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                markerEnd={
-                  connector.color === COLORS.accent ? 'url(#arrowHeadFig2)' : 'url(#arrowHeadFig2Alt)'
-                }
+                markerEnd={connector.arrow ? (connector.color === COLORS.accent ? 'url(#arrowHeadFig2)' : 'url(#arrowHeadFig2Alt)') : undefined}
               >
                 <title>{connector.title}</title>
               </path>
