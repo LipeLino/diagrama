@@ -1,4 +1,10 @@
 {
   "/_not-found/page": "/_not-found",
+  "/favicon.ico/route": "/favicon.ico",
+  "/figura-02/page": "/figura-02",
+  "/figura-03/page": "/figura-03",
+  "/figura-04/page": "/figura-04",
+  "/figura-05/page": "/figura-05",
+  "/figura-06/page": "/figura-06",
   "/page": "/"
 }

@@ -1,0 +1,47 @@
+﻿*** Begin Patch
+*** Update File: app\figura-02\Figure02_Encadeamento.tsx
+@@
+-              {decisionCards.map(({ id, title, Icon, details, hint, ref }) => (
+-                <article key={id} ref={ref} className={cardContainerClass}>
+-                  <div className="flex items-start gap-4">
+-                    <div className={iconWrapperClass} aria-hidden="true">
+-                      <Icon className="h-5 w-5" />
+-                    </div>
+-                    <div className="flex w-full flex-col gap-2">
+-                      <h2 className={${cardTitleClass} uppercase tracking-[0.4px]}>{title}</h2>
+-                      <ul className="space-y-1 text-[14px]/[20px] text-[#0f2747]/85">
+-                        {details.map((item) => (
+-                          <li key={item} className="flex items-center gap-2">
+-                            <span>{item}</span>
+-                          </li>
+-                        ))}
+-                      </ul>
+-                      <p className={hintClass}>{hint}</p>
+-                    </div>
+-                  </div>
+-                </article>
+-              ))}
++              {decisionCards.map(({ id, title, Icon, details, hint, ref }) => (
++                <article key={id} ref={ref} className={cardContainerClass}>
++                  <div className="flex items-start gap-4">
++                    <div className={iconWrapperClass} aria-hidden="true">
++                      <Icon className="h-5 w-5" />
++                    </div>
++                    <div className="flex w-full flex-col gap-2">
++                      <h2 className={${cardTitleClass} uppercase tracking-[0.4px]}>{title}</h2>
++                      <ul className="space-y-1 text-[14px]/[20px] text-[#0f2747]/85">
++                        {details.map(({ icon, text }) => (
++                          <li key={text} className="flex items-center gap-2">
++                            <span className="inline-flex w-5 justify-center text-base" aria-hidden="true">
++                              {icon}
++                            </span>
++                            <span className="flex-1">{text}</span>
++                          </li>
++                        ))}
++                      </ul>
++                      <p className={hintClass}>{hint}</p>
++                    </div>
++                  </div>
++                </article>
++              ))}
+*** End Patch

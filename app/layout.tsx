@@ -1,19 +1,35 @@
-export const metadata = {
-  title: 'Diagramas (Next + Tailwind)',
-  description: 'Figuras com conectores SVG e exportação',
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Diagramas Agroclimáticos",
+  description:
+    "Figuras interativas com Next.js, Tailwind CSS e conectores SVG para o TCC.",
 };
 
-import './globals.css';
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="pt-BR">
-      <body className="min-h-dvh antialiased">
-        <main className="max-w-7xl mx-auto p-6 md:p-8 lg:p-10">
-          {children}
-        </main>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-white text-[#0e223d]`}
+      >
+        {children}
       </body>
     </html>
   );
 }
-

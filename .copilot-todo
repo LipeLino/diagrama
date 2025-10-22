@@ -1,0 +1,7 @@
+- [x] Reorganize Figure 02 header and toolbar layout
+- [x] Update variable/indicator cards layout and pill styling
+- [x] Refine decision cards spacing and list presentation
+- [x] Balance vertical spacing in indicator lane
+- [x] Adjust connector offsets, curvature, and z-index
+- [x] Run npm run lint
+- [x] Run npm run build
