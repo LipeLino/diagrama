@@ -84,7 +84,6 @@ const ARROW_LENGTH = 16;
 const STRAIGHT_SEGMENT = 12; // Final straight perpendicular segment before arrow
 // To avoid a 90° step when multiple connectors merge, ensure the merge node
 // sits at least this extra distance before the start of the final straight stub.
-const MIN_CURVE_DX = 24; // px of horizontal lead-in so the curve meets the stub tangentially
 // Visual hint for merge points (drawn only when multiple sources merge)
 const MERGE_NODE_R = 4; // px
 // Minimum total horizontal gap from a target edge to its merge node for the
@@ -336,9 +335,15 @@ export const exportDiagramPDF = async (
   exportSvg.setAttribute('height', `${totalHeight}`);
   exportSvg.setAttribute('viewBox', `0 0 ${baseWidth} ${totalHeight}`);
 
-  // 1) Rebuild the HTML cards and lane headers as vector shapes inside the SVG
+  // 1) Rebuild the HTML cards and lanes as vector shapes inside the SVG
   const domLayer = document.createElementNS(NS, 'g');
   const containerRect = containerEl.getBoundingClientRect();
+
+  const measurementCanvas = document.createElement('canvas');
+  const measureCtx = measurementCanvas.getContext('2d');
+  if (!measureCtx) {
+    throw new Error('Canvas measurement context unavailable for PDF export');
+  }
 
   const roundedRect = (
     x: number,
@@ -364,178 +369,337 @@ export const exportDiagramPDF = async (
     return r;
   };
 
-  const addTextLines = (
-    x: number,
-    y: number,
-    lines: string[],
-    fontSize: number,
-    color: string,
-    weight: '400' | '700' = '400',
-  ) => {
-    const t = document.createElementNS(NS, 'text');
-    t.setAttribute('x', `${x}`);
-    t.setAttribute('y', `${y}`);
-    t.setAttribute('fill', color);
-    t.setAttribute('font-size', `${fontSize}`);
-    t.setAttribute('font-family', FONT_STACK);
-    if (weight === '700') t.setAttribute('font-weight', '700');
-    lines.forEach((ln, idx) => {
-      const sp = document.createElementNS(NS, 'tspan');
-      sp.setAttribute('x', `${x}`);
-      sp.setAttribute('dy', idx === 0 ? '0' : `${Math.round(fontSize * 1.35)}`);
-      sp.textContent = ln;
-      t.appendChild(sp);
-    });
-    return t;
+  const parsePx = (value: string | null, fallback: number) => {
+    if (!value) return fallback;
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
   };
 
-  const wrapText = (text: string, maxChars: number) => {
-    const words = text.split(/\s+/);
-    const lines: string[] = [];
-    let cur = '';
-    for (const w of words) {
-      const nx = cur ? `${cur} ${w}` : w;
-      if (nx.length > maxChars) {
-        if (cur) lines.push(cur);
-        cur = w;
-      } else {
-        cur = nx;
-      }
+  const getLineHeightPx = (style: CSSStyleDeclaration, fontSize: number) => {
+    const lh = style.lineHeight;
+    if (!lh || lh === 'normal') return fontSize * 1.4;
+    if (lh.endsWith('px')) {
+      const px = parseFloat(lh);
+      return Number.isFinite(px) ? px : fontSize * 1.4;
     }
-    if (cur) lines.push(cur);
+    const ratio = parseFloat(lh);
+    if (Number.isFinite(ratio)) return ratio * fontSize;
+    return fontSize * 1.4;
+  };
+
+  const applyTextTransform = (text: string, transform: string) => {
+    switch (transform) {
+      case 'uppercase':
+        return text.toUpperCase();
+      case 'lowercase':
+        return text.toLowerCase();
+      case 'capitalize':
+        return text.replace(/\b(\p{L})/gu, (match) => match.toUpperCase());
+      default:
+        return text;
+    }
+  };
+
+  const configureFont = (style: CSSStyleDeclaration) => {
+    const fontStyle = style.fontStyle || 'normal';
+    const fontVariant = style.fontVariant || 'normal';
+    const fontWeight = style.fontWeight || '400';
+    const fontSize = style.fontSize || '14px';
+    const fontFamily = style.fontFamily || FONT_STACK;
+    measureCtx.font = `${fontStyle} ${fontVariant} ${fontWeight} ${fontSize} ${fontFamily}`.trim();
+  };
+
+  const measureStringWidth = (text: string, style: CSSStyleDeclaration) => {
+    if (!text) return 0;
+    configureFont(style);
+    const base = measureCtx.measureText(text).width;
+    const letterSpacing = style.letterSpacing && style.letterSpacing !== 'normal' ? parsePx(style.letterSpacing, 0) : 0;
+    const wordSpacing = style.wordSpacing && style.wordSpacing !== 'normal' ? parsePx(style.wordSpacing, 0) : 0;
+    if (!letterSpacing && !wordSpacing) return base;
+    const letters = Math.max(0, text.length - 1);
+    const words = Math.max(0, (text.match(/\s+/g) || []).length);
+    return base + letterSpacing * letters + wordSpacing * words;
+  };
+
+  const wrapTextExact = (text: string, maxWidth: number, style: CSSStyleDeclaration) => {
+    if (!text) return [''];
+    if (maxWidth <= 0) return [text];
+    const words = text.split(/\s+/).filter(Boolean);
+    if (!words.length) return [''];
+    const lines: string[] = [];
+    let current = '';
+
+    const breakToken = (token: string) => {
+      let chunk = '';
+      for (const char of token) {
+        const candidate = chunk ? `${chunk}${char}` : char;
+        if (measureStringWidth(candidate, style) > maxWidth && chunk) {
+          lines.push(chunk);
+          chunk = char;
+        } else {
+          chunk = candidate;
+        }
+      }
+      return chunk;
+    };
+
+    words.forEach((word) => {
+      const candidate = current ? `${current} ${word}` : word;
+      if (measureStringWidth(candidate, style) <= maxWidth) {
+        current = candidate;
+        return;
+      }
+
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+
+      if (measureStringWidth(word, style) <= maxWidth) {
+        current = word;
+      } else {
+        current = breakToken(word);
+      }
+    });
+
+    if (current) {
+      lines.push(current);
+    }
+
     return lines;
   };
 
-  // Draw lane headers as solid bars with text
-  const laneHeaders = [
-    '#lane-variables',
-    '#lane-indicadores',
-    '#lane-decisoes',
-  ];
-  laneHeaders.forEach((sel) => {
-    const el = containerEl.querySelector(sel) as HTMLElement | null;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const x = r.left - containerRect.left;
-    const y = r.top - containerRect.top;
-    const bar = roundedRect(x, y, r.width, r.height, 12, COLORS.laneHead);
-    domLayer.appendChild(bar);
-    const label = (el.textContent || '').trim();
-    if (label) {
-      const tx = x + r.width / 2;
-      const ty = y + r.height / 2 + 4; // slight optical alignment
-      const t = document.createElementNS(NS, 'text');
-      t.setAttribute('x', `${tx}`);
-      t.setAttribute('y', `${ty}`);
-      t.setAttribute('fill', '#ffffff');
-      t.setAttribute('font-size', '14');
-      t.setAttribute('font-weight', '700');
-      t.setAttribute('font-family', FONT_STACK);
-      t.setAttribute('text-anchor', 'middle');
-      t.textContent = label;
-      domLayer.appendChild(t);
-    }
-  });
+  type TextOptions = { align?: 'left' | 'center'; color?: string };
 
-  // Draw card rectangles and key text content
-  const articles = Array.from(containerEl.querySelectorAll('article')) as HTMLElement[];
-  articles.forEach((art) => {
-    const r = art.getBoundingClientRect();
-    const x = r.left - containerRect.left;
-    const y = r.top - containerRect.top;
-    // Soft vector shadow (no filters): two faint layers
-    const shadow1 = roundedRect(x, y, r.width, r.height, 10, '#000000');
-    shadow1.setAttribute('fill-opacity', '0.05');
-    shadow1.setAttribute('transform', `translate(0,1)`);
+  const createTextFromElement = (el: HTMLElement, options: TextOptions = {}) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const paddingLeft = parsePx(style.paddingLeft, 0);
+    const paddingRight = parsePx(style.paddingRight, 0);
+    const paddingTop = parsePx(style.paddingTop, 0);
+    const fontSize = parsePx(style.fontSize, 14);
+    const lineHeight = getLineHeightPx(style, fontSize);
+    const align = options.align ?? (style.textAlign === 'center' ? 'center' : 'left');
+
+    const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const transformed = applyTextTransform(raw, style.textTransform || 'none');
+    const maxWidth = Math.max(0, rect.width - paddingLeft - paddingRight);
+    const lines = wrapTextExact(transformed, maxWidth, style);
+
+    const textElement = document.createElementNS(NS, 'text');
+    const anchorX = align === 'center'
+      ? rect.left - containerRect.left + paddingLeft + maxWidth / 2
+      : rect.left - containerRect.left + paddingLeft;
+    const topY = rect.top - containerRect.top + paddingTop;
+    const baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
+
+    textElement.setAttribute('x', `${anchorX}`);
+    textElement.setAttribute('y', `${baseline}`);
+    textElement.setAttribute('fill', options.color ?? style.color ?? COLORS.text);
+    textElement.setAttribute('font-size', `${fontSize}`);
+    textElement.setAttribute('font-family', style.fontFamily || FONT_STACK);
+    textElement.setAttribute('font-weight', style.fontWeight || '400');
+    textElement.setAttribute('font-style', style.fontStyle || 'normal');
+    textElement.setAttribute('dominant-baseline', 'alphabetic');
+    textElement.setAttribute('text-rendering', 'geometricPrecision');
+    if (align === 'center') {
+      textElement.setAttribute('text-anchor', 'middle');
+    }
+    const letterSpacing = style.letterSpacing;
+    if (letterSpacing && letterSpacing !== 'normal') {
+      textElement.setAttribute('letter-spacing', letterSpacing);
+    }
+
+    lines.forEach((line, index) => {
+      const tspan = document.createElementNS(NS, 'tspan');
+      tspan.setAttribute('x', `${anchorX}`);
+      if (index > 0) {
+        tspan.setAttribute('dy', `${lineHeight}`);
+      }
+      tspan.textContent = line;
+      textElement.appendChild(tspan);
+    });
+
+    return textElement;
+  };
+
+  // Lane backgrounds
+  const laneSections = Array.from(containerEl.querySelectorAll('[data-export="lane"]')) as HTMLElement[];
+  laneSections.forEach((lane) => {
+    const rect = lane.getBoundingClientRect();
+    const style = getComputedStyle(lane);
+    const radius = parsePx(style.borderRadius, 16);
+    const stroke = style.borderTopColor || COLORS.border;
+    const strokeWidth = parsePx(style.borderTopWidth, 2);
+    const x = rect.left - containerRect.left;
+    const y = rect.top - containerRect.top;
+
+    const shadow1 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
+    shadow1.setAttribute('fill-opacity', '0.04');
+    shadow1.setAttribute('transform', 'translate(0,1)');
     domLayer.appendChild(shadow1);
-    const shadow2 = roundedRect(x, y, r.width, r.height, 10, '#000000');
-    shadow2.setAttribute('fill-opacity', '0.03');
-    shadow2.setAttribute('transform', `translate(0,2)`);
+    const shadow2 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
+    shadow2.setAttribute('fill-opacity', '0.025');
+    shadow2.setAttribute('transform', 'translate(0,2)');
     domLayer.appendChild(shadow2);
 
-    // Card body with subtle panel gradient
-    const card = roundedRect(x, y, r.width, r.height, 10, 'url(#panelGrad)', COLORS.cardBorder, 1);
-    domLayer.appendChild(card);
+    const body = roundedRect(x, y, rect.width, rect.height, radius, 'url(#panelGrad)', stroke, strokeWidth);
+    domLayer.appendChild(body);
+  });
 
-    // Icon wrapper + SVG icon (cloned from DOM for fidelity)
-    const iconSize = 28;
-    const iconPad = 16; // left padding
-    const iconWrapper = roundedRect(x + iconPad, y + 12, iconSize, iconSize, 8, COLORS.iconBg, '#90caf9', 1);
-    domLayer.appendChild(iconWrapper);
-    const origIcon = art.querySelector('svg');
-    if (origIcon) {
-      const ic = origIcon.cloneNode(true) as SVGSVGElement;
-      // Normalize icon styling to avoid CSS dependencies
-      const parentColor = getComputedStyle(origIcon.parentElement || origIcon).color || COLORS.iconBorder;
-      ic.setAttribute('width', '18');
-      ic.setAttribute('height', '18');
-      ic.setAttribute('x', `${x + iconPad + (iconSize - 18) / 2}`);
-      ic.setAttribute('y', `${y + 12 + (iconSize - 18) / 2}`);
-      ic.setAttribute('stroke', parentColor);
-      ic.setAttribute('fill', 'none');
-      if (!ic.getAttribute('stroke-width')) ic.setAttribute('stroke-width', '2');
-      ic.setAttribute('stroke-linecap', 'round');
-      ic.setAttribute('stroke-linejoin', 'round');
-      domLayer.appendChild(ic);
-    }
+  // Lane headers (drawn atop background)
+  const laneHeaders = Array.from(containerEl.querySelectorAll('[data-export="lane-header"]')) as HTMLElement[];
+  laneHeaders.forEach((header) => {
+    const rect = header.getBoundingClientRect();
+    const x = rect.left - containerRect.left;
+    const y = rect.top - containerRect.top;
+    const bar = roundedRect(x, y, rect.width, rect.height, 12, COLORS.laneHead);
+    domLayer.appendChild(bar);
+    const text = createTextFromElement(header, { align: 'center', color: '#ffffff' });
+    domLayer.appendChild(text);
+  });
 
-    // Title
-    const h2 = art.querySelector('h2');
-    const title = (h2?.textContent || '').trim();
-    if (title) {
-      const lines = wrapText(title, Math.floor((r.width - 32) / 8));
-      const textEl = addTextLines(x + 16 + iconSize + 8, y + 28, lines, 14, COLORS.text, '700');
-      domLayer.appendChild(textEl);
-    }
+  // Cards and inner content
+  const cards = Array.from(containerEl.querySelectorAll('article[data-export-card]')) as HTMLElement[];
+  cards.forEach((cardEl) => {
+    const rect = cardEl.getBoundingClientRect();
+    const style = getComputedStyle(cardEl);
+    const radius = parsePx(style.borderRadius, 10);
+    const stroke = style.borderTopColor || COLORS.cardBorder;
+    const strokeWidth = parsePx(style.borderTopWidth, 1);
+    const x = rect.left - containerRect.left;
+    const y = rect.top - containerRect.top;
 
-    // Unit pill (optional): look for a span that is positioned to the right in DOM
-    const unitSpan = Array.from(art.querySelectorAll('span')).find((sp) => (sp.textContent || '').length <= 12);
-    if (unitSpan && unitSpan.textContent) {
-      const u = unitSpan.textContent.trim();
-      if (u) {
-        const padX = 8, padY = 6;
-        const fs = 11;
-        // Measure roughly: width per char ~ 6 px at 11px font
-        const w = Math.max(30, u.length * 6 + padX * 2);
-        const h = fs + padY * 2;
-        const rx = 6;
-        const ux = x + r.width - 16 - w;
-        const uy = y + 10;
-        const pill = roundedRect(ux, uy, w, h, rx, 'url(#pillGrad)', '#90caf9', 1);
-        domLayer.appendChild(pill);
-        const t = document.createElementNS(NS, 'text');
-        t.setAttribute('x', `${ux + padX}`);
-        t.setAttribute('y', `${uy + h - padY - 2}`);
-        t.setAttribute('fill', '#0d47a1');
-        t.setAttribute('font-size', `${fs}`);
-        t.setAttribute('font-weight', '700');
-        t.setAttribute('font-family', FONT_STACK);
-        t.textContent = u;
-        domLayer.appendChild(t);
+    const shadow1 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
+    shadow1.setAttribute('fill-opacity', '0.05');
+    shadow1.setAttribute('transform', 'translate(0,1)');
+    domLayer.appendChild(shadow1);
+    const shadow2 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
+    shadow2.setAttribute('fill-opacity', '0.03');
+    shadow2.setAttribute('transform', 'translate(0,2)');
+    domLayer.appendChild(shadow2);
+
+    const body = roundedRect(x, y, rect.width, rect.height, radius, 'url(#panelGrad)', stroke, strokeWidth);
+    domLayer.appendChild(body);
+
+    const iconWrapper = cardEl.querySelector('[data-export="icon-wrapper"]') as HTMLElement | null;
+    if (iconWrapper) {
+      const iRect = iconWrapper.getBoundingClientRect();
+      const iStyle = getComputedStyle(iconWrapper);
+      const iconRadius = parsePx(iStyle.borderRadius, 8);
+      const iconStroke = iStyle.borderTopColor || '#90caf9';
+      const iconStrokeWidth = parsePx(iStyle.borderTopWidth, 1);
+      const wrapperRect = roundedRect(
+        iRect.left - containerRect.left,
+        iRect.top - containerRect.top,
+        iRect.width,
+        iRect.height,
+        iconRadius,
+        iStyle.backgroundColor || COLORS.iconBg,
+        iconStroke,
+        iconStrokeWidth,
+      );
+      domLayer.appendChild(wrapperRect);
+
+      const iconSvg = iconWrapper.querySelector('svg[data-export="icon"]');
+      if (iconSvg) {
+        const svgRect = iconSvg.getBoundingClientRect();
+        const svgClone = iconSvg.cloneNode(true) as SVGSVGElement;
+        svgClone.setAttribute('x', `${svgRect.left - containerRect.left}`);
+        svgClone.setAttribute('y', `${svgRect.top - containerRect.top}`);
+        svgClone.setAttribute('width', `${svgRect.width}`);
+        svgClone.setAttribute('height', `${svgRect.height}`);
+        const svgStyle = getComputedStyle(iconSvg);
+        const strokeColor = svgStyle.stroke && svgStyle.stroke !== 'none'
+          ? svgStyle.stroke
+          : svgStyle.color || COLORS.iconBorder;
+        svgClone.setAttribute('stroke', strokeColor);
+        const strokeWidthValue = svgStyle.strokeWidth && svgStyle.strokeWidth !== 'none'
+          ? svgStyle.strokeWidth
+          : '2';
+        svgClone.setAttribute('stroke-width', strokeWidthValue);
+        svgClone.setAttribute('stroke-linecap', 'round');
+        svgClone.setAttribute('stroke-linejoin', 'round');
+        svgClone.setAttribute('fill', svgStyle.fill && svgStyle.fill !== 'none' ? svgStyle.fill : 'none');
+        domLayer.appendChild(svgClone);
       }
     }
 
-    // Description (first paragraph)
-    const p = art.querySelector('p');
-    const desc = (p?.textContent || '').trim();
-    if (desc) {
-      const lines = wrapText(desc, Math.floor((r.width - 32) / 7));
-      const textEl = addTextLines(x + 16, y + 54, lines, 12, '#2d3748', '400');
-      domLayer.appendChild(textEl);
+    const titleEl = cardEl.querySelector('[data-export="card-title"]') as HTMLElement | null;
+    if (titleEl) {
+      domLayer.appendChild(createTextFromElement(titleEl));
     }
 
-    // Decision details list (if present)
-    const lis = Array.from(art.querySelectorAll('ul li')) as HTMLElement[];
-    if (lis.length) {
-      let y0 = y + 68;
-      lis.forEach((li, idx) => {
-        const txt = (li.textContent || '').replace(/^\s*•\s*/, '').trim();
-        if (!txt) return;
-        const lines = wrapText(txt, Math.floor((r.width - 44) / 7));
-        const t = addTextLines(x + 24, y0, lines, 11, '#37474f', '400');
-        domLayer.appendChild(t);
-        y0 += lines.length * Math.round(11 * 1.35) + 2;
-      });
+    const descriptionEl = cardEl.querySelector('[data-export="card-description"]') as HTMLElement | null;
+    if (descriptionEl) {
+      domLayer.appendChild(createTextFromElement(descriptionEl));
+    }
+
+    const unitEl = cardEl.querySelector('[data-export="unit-pill"]') as HTMLElement | null;
+    if (unitEl) {
+      const pillRect = unitEl.getBoundingClientRect();
+      const pillStyle = getComputedStyle(unitEl);
+      const pillRadius = parsePx(pillStyle.borderRadius, 6);
+      const pillStroke = pillStyle.borderTopColor || '#90caf9';
+      const pillStrokeWidth = parsePx(pillStyle.borderTopWidth, 1);
+      const pill = roundedRect(
+        pillRect.left - containerRect.left,
+        pillRect.top - containerRect.top,
+        pillRect.width,
+        pillRect.height,
+        pillRadius,
+        'url(#pillGrad)',
+        pillStroke,
+        pillStrokeWidth,
+      );
+      domLayer.appendChild(pill);
+      domLayer.appendChild(createTextFromElement(unitEl));
+    }
+
+    const dividerEl = cardEl.querySelector('[data-export="card-divider"]') as HTMLElement | null;
+    if (dividerEl) {
+      const dRect = dividerEl.getBoundingClientRect();
+      const divStyle = getComputedStyle(dividerEl);
+      const divider = document.createElementNS(NS, 'line');
+      const yPos = dRect.top - containerRect.top + parsePx(divStyle.borderTopWidth, 1) / 2;
+      divider.setAttribute('x1', `${dRect.left - containerRect.left}`);
+      divider.setAttribute('x2', `${dRect.right - containerRect.left}`);
+      divider.setAttribute('y1', `${yPos}`);
+      divider.setAttribute('y2', `${yPos}`);
+      divider.setAttribute('stroke', divStyle.borderTopColor || '#d1d9e0');
+      divider.setAttribute('stroke-width', divStyle.borderTopWidth || '1');
+      domLayer.appendChild(divider);
+    }
+
+    const detailIcons = Array.from(cardEl.querySelectorAll('[data-export="detail-icon"]')) as HTMLElement[];
+    detailIcons.forEach((iconEl) => {
+      domLayer.appendChild(createTextFromElement(iconEl, { align: 'center' }));
+    });
+
+    const detailTexts = Array.from(cardEl.querySelectorAll('[data-export="detail-text"]')) as HTMLElement[];
+    detailTexts.forEach((detailEl) => {
+      domLayer.appendChild(createTextFromElement(detailEl));
+    });
+
+    const hintEl = cardEl.querySelector('[data-export="card-hint"]') as HTMLElement | null;
+    if (hintEl) {
+      const hRect = hintEl.getBoundingClientRect();
+      const hStyle = getComputedStyle(hintEl);
+      const hintRadius = parsePx(hStyle.borderRadius, 6);
+      const hintStroke = hStyle.borderTopColor || '#90caf9';
+      const hintStrokeWidth = parsePx(hStyle.borderTopWidth, 1);
+      const hintBox = roundedRect(
+        hRect.left - containerRect.left,
+        hRect.top - containerRect.top,
+        hRect.width,
+        hRect.height,
+        hintRadius,
+        hStyle.backgroundColor || '#e3f2fd',
+        hintStroke,
+        hintStrokeWidth,
+      );
+      domLayer.appendChild(hintBox);
+      domLayer.appendChild(createTextFromElement(hintEl));
     }
   });
 
@@ -729,6 +893,9 @@ function useRerouteOnResize(refs: Array<React.RefObject<Element | null>>, onResi
       observer.disconnect();
       window.removeEventListener('resize', schedule);
     };
+    // We intentionally skip `refs` to avoid re-subscribing observers on every render.
+    // The observed elements are stable DOM nodes tied to these refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onResize]);
 }
 
@@ -756,21 +923,6 @@ function useMergePoint(
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
 
-    const centers: number[] = [];
-    for (const r of sourceRefsRef.current) {
-      const el = r.current;
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      centers.push(rect.top + rect.height / 2 - containerRect.top);
-    }
-    // Fallback to target center if sources not ready
-    const avgY =
-      centers.length > 0
-        ? centers.reduce((a, b) => a + b, 0) / centers.length
-        : targetRect.top + targetRect.height / 2 - containerRect.top;
-
-  const targetTop = targetRect.top - containerRect.top;
-  const targetBottom = targetTop + targetRect.height;
     // Lock merge Y to the exact target centerline so the final segment
     // from merge → target can be a perfectly straight horizontal run.
     const y = targetRect.top + targetRect.height / 2 - containerRect.top;
@@ -1363,26 +1515,47 @@ export default function Figure02_Encadeamento(): React.ReactElement {
               ))}
           </svg>
 
-          <section className={laneClass} aria-labelledby="lane-variables">
-            <div className={laneHeadClass} id="lane-variables">
+          <section className={laneClass} aria-labelledby="lane-variables" data-export="lane">
+            <div className={laneHeadClass} id="lane-variables" data-export="lane-header">
               VARIÁVEIS METEOROLÓGICAS
             </div>
             <div className={laneBodyClass}>
               {variableCards.map(({ id, title, unit, description, Icon, ref }) => {
                 return (
-                  <article key={id} ref={ref} className={variableCardClass}>
+                  <article
+                    key={id}
+                    ref={ref}
+                    className={variableCardClass}
+                    data-export-card="variable"
+                  >
                     <div className="flex items-center gap-4">
-                      <div className={`${iconWrapperClass} shrink-0`} aria-hidden="true">
-                        <Icon className="h-4 w-4" />
+                      <div
+                        className={`${iconWrapperClass} shrink-0`}
+                        aria-hidden="true"
+                        data-export="icon-wrapper"
+                      >
+                        <Icon className="h-4 w-4" data-export="icon" />
                       </div>
                       <div className="flex w-full flex-col gap-y-1.5">
                         <div className="relative flex items-start">
-                          <h2 className={`${cardTitleClass} flex-1 min-w-0 pr-16`}>{title}</h2>
+                          <h2
+                            className={`${cardTitleClass} flex-1 min-w-0 pr-16`}
+                            data-export="card-title"
+                          >
+                            {title}
+                          </h2>
                           {unit ? (
-                            <span className={`${pillTextClass} shrink-0 absolute top-0 right-0`}>{unit}</span>
+                            <span
+                              className={`${pillTextClass} shrink-0 absolute top-0 right-0`}
+                              data-export="unit-pill"
+                            >
+                              {unit}
+                            </span>
                           ) : null}
                         </div>
-                        <p className={cardBodyTextClass}>{description}</p>
+                        <p className={cardBodyTextClass} data-export="card-description">
+                          {description}
+                        </p>
                       </div>
                     </div>
                   </article>
@@ -1391,26 +1564,47 @@ export default function Figure02_Encadeamento(): React.ReactElement {
             </div>
           </section>
 
-          <section className={laneClass} aria-labelledby="lane-indicadores">
-            <div className={laneHeadClass} id="lane-indicadores">
+          <section className={laneClass} aria-labelledby="lane-indicadores" data-export="lane">
+            <div className={laneHeadClass} id="lane-indicadores" data-export="lane-header">
               INDICADORES DERIVADOS
             </div>
             <div className={`${laneBodyClass}`} style={{ gap: '48px' }}>
               {indicatorCards.map(({ id, title, unit, description, Icon, ref }) => {
                 return (
-                  <article key={id} ref={ref} className={cardContainerClass}>
+                  <article
+                    key={id}
+                    ref={ref}
+                    className={cardContainerClass}
+                    data-export-card="indicator"
+                  >
                     <div className="flex items-center gap-4">
-                      <div className={`${iconWrapperClass} shrink-0`} aria-hidden="true">
-                        <Icon className="h-4 w-4" />
+                      <div
+                        className={`${iconWrapperClass} shrink-0`}
+                        aria-hidden="true"
+                        data-export="icon-wrapper"
+                      >
+                        <Icon className="h-4 w-4" data-export="icon" />
                       </div>
                       <div className="flex w-full flex-col gap-y-1.5">
                         <div className="relative flex items-start">
-                          <h2 className={`${cardTitleClass} flex-1 min-w-0 pr-16`}>{title}</h2>
+                          <h2
+                            className={`${cardTitleClass} flex-1 min-w-0 pr-16`}
+                            data-export="card-title"
+                          >
+                            {title}
+                          </h2>
                           {unit ? (
-                            <span className={`${pillTextClass} shrink-0 absolute top-0 right-0`}>{unit}</span>
+                            <span
+                              className={`${pillTextClass} shrink-0 absolute top-0 right-0`}
+                              data-export="unit-pill"
+                            >
+                              {unit}
+                            </span>
                           ) : null}
                         </div>
-                        <p className={cardBodyTextClass}>{description}</p>
+                        <p className={cardBodyTextClass} data-export="card-description">
+                          {description}
+                        </p>
                       </div>
                     </div>
                   </article>
@@ -1419,35 +1613,53 @@ export default function Figure02_Encadeamento(): React.ReactElement {
             </div>
           </section>
 
-          <section className={laneClass} aria-labelledby="lane-decisoes">
-            <div className={laneHeadClass} id="lane-decisoes">
+          <section className={laneClass} aria-labelledby="lane-decisoes" data-export="lane">
+            <div className={laneHeadClass} id="lane-decisoes" data-export="lane-header">
               DECISÃO OPERACIONAL
             </div>
             <div className={laneBodyClass}>
               {decisionCards.map(({ id, title, Icon, details, hint, ref }) => (
-                <article key={id} ref={ref} className={cardContainerClass}>
+                <article
+                  key={id}
+                  ref={ref}
+                  className={cardContainerClass}
+                  data-export-card="decision"
+                >
                   <div className="flex w-full flex-col">
                     <div className="flex items-center gap-4 mb-3">
-                      <div className={iconWrapperClass} aria-hidden="true">
-                        <Icon className="h-4 w-4" />
+                      <div className={iconWrapperClass} aria-hidden="true" data-export="icon-wrapper">
+                        <Icon className="h-4 w-4" data-export="icon" />
                       </div>
-                      <h2 className={`${cardTitleClass} uppercase tracking-wide`}>{title}</h2>
+                      <h2
+                        className={`${cardTitleClass} uppercase tracking-wide`}
+                        data-export="card-title"
+                      >
+                        {title}
+                      </h2>
                     </div>
-                    <div className="border-t border-[#d1d9e0] pt-2.5 pb-1.5">
+                    <div className="border-t border-[#d1d9e0] pt-2.5 pb-1.5" data-export="card-divider">
                       <ul className="space-y-1 text-xs leading-snug text-[#37474f]">
                         {details.map(({ icon, text }) => (
                           <li key={text} className="flex items-start gap-2">
                             {icon && (
-                              <span className="inline-flex w-6 justify-center text-base shrink-0 mt-0.5 text-[#1565c0] font-bold" aria-hidden="true">
+                              <span
+                                className="inline-flex w-6 justify-center text-base shrink-0 mt-0.5 text-[#1565c0] font-bold"
+                                aria-hidden="true"
+                                data-export="detail-icon"
+                              >
                                 {icon}
                               </span>
                             )}
-                            <span className="flex-1">{text}</span>
+                            <span className="flex-1" data-export="detail-text">
+                              {text}
+                            </span>
                           </li>
                         ))}
                       </ul>
                     </div>
-                    <p className={hintClass}>{hint}</p>
+                    <p className={hintClass} data-export="card-hint">
+                      {hint}
+                    </p>
                   </div>
                 </article>
               ))}
