@@ -255,7 +255,7 @@ export const exportDiagramPDF = async (
     { color: STROKE_BY_TARGET.bh, left: 'Grupo BH', right: 'Planejamento operacional (D3)' },
     { color: STROKE_BY_TARGET.gdd, left: 'Grupo GDD', right: 'Manejo fitossanitário (D2)' },
   ];
-  const captionText = 'Legenda: Fluxo em duas etapas — (1) Variáveis → Indicadores; (2) Indicadores → Decisões. As setas usam três cores consistentes por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.';
+  const captionText = 'Legenda: Fluxo em duas etapas — (1) Variáveis → Indicadores; (2) Indicadores → Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.';
 
   // Create export SVG (diagram + caption)
   const NS = 'http://www.w3.org/2000/svg';
@@ -1489,7 +1489,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
             <ArrowRight size={14} strokeWidth={2.5} className="inline mx-1 align-[-1px] text-[#607d8b]" aria-hidden="true" />
             Indicadores; (2) Indicadores
             <ArrowRight size={14} strokeWidth={2.5} className="inline mx-1 align-[-1px] text-[#607d8b]" aria-hidden="true" />
-            Decisões. As setas usam três cores consistentes por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
+            Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
           </p>
         </footer>
         </div>
