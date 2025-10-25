@@ -1,6 +1,11 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
   "/api/export-figura02/route": "app/api/export-figura02/route.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
   "/figura-02/page": "app/figura-02/page.js",
+  "/figura-03/page": "app/figura-03/page.js",
+  "/figura-04/page": "app/figura-04/page.js",
+  "/figura-05/page": "app/figura-05/page.js",
+  "/figura-06/page": "app/figura-06/page.js",
   "/page": "app/page.js"
 }

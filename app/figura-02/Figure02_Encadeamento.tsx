@@ -234,29 +234,35 @@ export const exportDiagramPDF = async (
     });
   };
 
-  const bounds = svgElement.getBoundingClientRect();
-  const baseWidth = Math.max(1, bounds.width);
-  const baseHeight = Math.max(1, bounds.height);
+  const containerRect = containerEl.getBoundingClientRect();
+  // Tight framing: compute bounds across lanes + legend only (exclude title/buttons)
+  const laneEls = Array.from(containerEl.querySelectorAll('[data-export="lane"]')) as HTMLElement[];
+  const legendForBounds = containerEl.querySelector('[data-export="legend"]') as HTMLElement | null;
+  const boundEls: HTMLElement[] = [...laneEls, ...(legendForBounds ? [legendForBounds] : [])];
+  let minL = Number.POSITIVE_INFINITY;
+  let minT = Number.POSITIVE_INFINITY;
+  let maxR = Number.NEGATIVE_INFINITY;
+  let maxB = Number.NEGATIVE_INFINITY;
+  boundEls.forEach((el) => {
+    const r = el.getBoundingClientRect();
+    minL = Math.min(minL, r.left);
+    minT = Math.min(minT, r.top);
+    maxR = Math.max(maxR, r.right);
+    maxB = Math.max(maxB, r.bottom);
+  });
+  if (!Number.isFinite(minL)) {
+    // Fallback to container if query fails
+    minL = containerRect.left;
+    minT = containerRect.top;
+    maxR = containerRect.right;
+    maxB = containerRect.bottom;
+  }
+  const x0 = minL;
+  const y0 = minT;
+  const baseWidth = Math.max(1, Math.round(maxR - minL));
+  const baseHeight = Math.max(1, Math.round(maxB - minT));
 
-  const captionPaddingX = 24; // px left/right padding
-  const captionPaddingY = 20; // px top/bottom padding
-  const captionLine = 18; // px line height for paragraph
-  const captionGap = 14; // gap between legend and paragraph
-  const legendSwatchW = 36;
-  const legendSwatchH = 8;
-  const legendItemGap = 12;
-
-  // Caption strings (keep in sync with HTML footer)
-  const legendTitle = 'Cores dos conectores (por grupo)';
-  type LegendItem = { color: string; left: string; right: string };
-  const legendItems: LegendItem[] = [
-    { color: STROKE_BY_TARGET.et0, left: 'Grupo ET₀', right: 'Decisão de irrigação (D1)' },
-    { color: STROKE_BY_TARGET.bh, left: 'Grupo BH', right: 'Planejamento operacional (D3)' },
-    { color: STROKE_BY_TARGET.gdd, left: 'Grupo GDD', right: 'Manejo fitossanitário (D2)' },
-  ];
-  const captionText = 'Legenda: Fluxo em duas etapas — (1) Variáveis → Indicadores; (2) Indicadores → Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.';
-
-  // Create export SVG (diagram + caption)
+  // Create export SVG (diagram only; legend reconstructed separately via DOM layer)
   const NS = 'http://www.w3.org/2000/svg';
   const exportSvg = document.createElementNS(NS, 'svg');
   exportSvg.setAttribute('xmlns', NS);
@@ -298,46 +304,19 @@ export const exportDiagramPDF = async (
   defs.appendChild(panelGrad);
 
   exportSvg.appendChild(defs);
-  // Estimate caption height based on lines: title + legend items (single row) + paragraph
-  const wrap = (text: string, maxChars: number) => {
-    const words = text.split(' ');
-    const lines: string[] = [];
-    let current = '';
-    for (const w of words) {
-      const next = current ? `${current} ${w}` : w;
-      if (next.length > maxChars) {
-        if (current) lines.push(current);
-        current = w;
-      } else {
-        current = next;
-      }
-    }
-    if (current) lines.push(current);
-    return lines;
-  };
+  // Solid white page background to avoid transparent-on-black PDF viewers
+  const pageBg = document.createElementNS(NS, 'rect');
+  pageBg.setAttribute('x', '0');
+  pageBg.setAttribute('y', '0');
+  pageBg.setAttribute('width', `${baseWidth}`);
+  pageBg.setAttribute('height', `${baseHeight}`);
+  pageBg.setAttribute('fill', '#ffffff');
+  exportSvg.appendChild(pageBg);
+  exportSvg.setAttribute('height', `${baseHeight}`);
+  exportSvg.setAttribute('viewBox', `0 0 ${baseWidth} ${baseHeight}`);
 
-  const paragraphLines = wrap(
-    captionText,
-    Math.max(56, Math.floor((baseWidth - 2 * captionPaddingX) / 7)),
-  ); // rough wrap tuned for ~12px text
-
-  const legendRows = 1; // lay items horizontally with equal spacing
-  const captionContentHeight =
-    captionPaddingY +
-    captionLine +
-    16 + // space after title
-    legendRows * (legendSwatchH + 14) +
-    captionGap +
-    paragraphLines.length * captionLine +
-    captionPaddingY;
-
-  const totalHeight = baseHeight + captionContentHeight;
-  exportSvg.setAttribute('height', `${totalHeight}`);
-  exportSvg.setAttribute('viewBox', `0 0 ${baseWidth} ${totalHeight}`);
-
-  // 1) Rebuild the HTML cards and lanes as vector shapes inside the SVG
+  // 1) Rebuild the HTML cards, lanes, and legend as vector shapes inside the SVG
   const domLayer = document.createElementNS(NS, 'g');
-  const containerRect = containerEl.getBoundingClientRect();
 
   const measurementCanvas = document.createElement('canvas');
   const measureCtx = measurementCanvas.getContext('2d');
@@ -488,17 +467,34 @@ export const exportDiagramPDF = async (
 
     const textElement = document.createElementNS(NS, 'text');
     const anchorX = align === 'center'
-      ? rect.left - containerRect.left + paddingLeft + maxWidth / 2
-      : rect.left - containerRect.left + paddingLeft;
-    const topY = rect.top - containerRect.top + paddingTop;
+      ? rect.left - x0 + paddingLeft + maxWidth / 2
+      : rect.left - x0 + paddingLeft;
+    const topY = rect.top - y0 + paddingTop;
     const baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
 
     textElement.setAttribute('x', `${anchorX}`);
     textElement.setAttribute('y', `${baseline}`);
     textElement.setAttribute('fill', options.color ?? style.color ?? COLORS.text);
     textElement.setAttribute('font-size', `${fontSize}`);
-    textElement.setAttribute('font-family', style.fontFamily || FONT_STACK);
-    textElement.setAttribute('font-weight', style.fontWeight || '400');
+    // Map to concrete Inter font files to preserve exact weights in PDF
+    const rawFamily = style.fontFamily || FONT_STACK;
+    const primaryFamily = rawFamily.split(',')[0].replace(/['"]/g, '').trim();
+    const fw = (style.fontWeight || '400').toString();
+    const fwNum = parseInt(fw, 10);
+    let svgFamily = primaryFamily || 'Inter';
+    if (primaryFamily.toLowerCase().includes('inter')) {
+      if (Number.isFinite(fwNum)) {
+        if (fwNum >= 700) svgFamily = 'Inter-Bold';
+        else if (fwNum >= 600) svgFamily = 'Inter-SemiBold';
+        else svgFamily = 'Inter-Regular';
+      } else if (fw.toLowerCase() === 'bold') {
+        svgFamily = 'Inter-Bold';
+      } else {
+        svgFamily = 'Inter-Regular';
+      }
+    }
+    textElement.setAttribute('font-family', svgFamily);
+    textElement.setAttribute('font-weight', fw);
     textElement.setAttribute('font-style', style.fontStyle || 'normal');
     textElement.setAttribute('dominant-baseline', 'alphabetic');
     textElement.setAttribute('text-rendering', 'geometricPrecision');
@@ -531,8 +527,8 @@ export const exportDiagramPDF = async (
     const radius = parsePx(style.borderRadius, 16);
     const stroke = style.borderTopColor || COLORS.border;
     const strokeWidth = parsePx(style.borderTopWidth, 2);
-    const x = rect.left - containerRect.left;
-    const y = rect.top - containerRect.top;
+  const x = rect.left - x0;
+  const y = rect.top - y0;
 
     const shadow1 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
     shadow1.setAttribute('fill-opacity', '0.04');
@@ -551,8 +547,8 @@ export const exportDiagramPDF = async (
   const laneHeaders = Array.from(containerEl.querySelectorAll('[data-export="lane-header"]')) as HTMLElement[];
   laneHeaders.forEach((header) => {
     const rect = header.getBoundingClientRect();
-    const x = rect.left - containerRect.left;
-    const y = rect.top - containerRect.top;
+  const x = rect.left - x0;
+  const y = rect.top - y0;
     const bar = roundedRect(x, y, rect.width, rect.height, 12, COLORS.laneHead);
     domLayer.appendChild(bar);
     const text = createTextFromElement(header, { align: 'center', color: '#ffffff' });
@@ -567,8 +563,8 @@ export const exportDiagramPDF = async (
     const radius = parsePx(style.borderRadius, 10);
     const stroke = style.borderTopColor || COLORS.cardBorder;
     const strokeWidth = parsePx(style.borderTopWidth, 1);
-    const x = rect.left - containerRect.left;
-    const y = rect.top - containerRect.top;
+  const x = rect.left - x0;
+  const y = rect.top - y0;
 
     const shadow1 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
     shadow1.setAttribute('fill-opacity', '0.05');
@@ -590,8 +586,8 @@ export const exportDiagramPDF = async (
       const iconStroke = iStyle.borderTopColor || '#90caf9';
       const iconStrokeWidth = parsePx(iStyle.borderTopWidth, 1);
       const wrapperRect = roundedRect(
-        iRect.left - containerRect.left,
-        iRect.top - containerRect.top,
+  iRect.left - x0,
+  iRect.top - y0,
         iRect.width,
         iRect.height,
         iconRadius,
@@ -603,10 +599,10 @@ export const exportDiagramPDF = async (
 
       const iconSvg = iconWrapper.querySelector('svg[data-export="icon"]');
       if (iconSvg) {
-        const svgRect = iconSvg.getBoundingClientRect();
+  const svgRect = iconSvg.getBoundingClientRect();
         const svgClone = iconSvg.cloneNode(true) as SVGSVGElement;
-        svgClone.setAttribute('x', `${svgRect.left - containerRect.left}`);
-        svgClone.setAttribute('y', `${svgRect.top - containerRect.top}`);
+  svgClone.setAttribute('x', `${svgRect.left - x0}`);
+  svgClone.setAttribute('y', `${svgRect.top - y0}`);
         svgClone.setAttribute('width', `${svgRect.width}`);
         svgClone.setAttribute('height', `${svgRect.height}`);
         const svgStyle = getComputedStyle(iconSvg);
@@ -643,8 +639,8 @@ export const exportDiagramPDF = async (
       const pillStroke = pillStyle.borderTopColor || '#90caf9';
       const pillStrokeWidth = parsePx(pillStyle.borderTopWidth, 1);
       const pill = roundedRect(
-        pillRect.left - containerRect.left,
-        pillRect.top - containerRect.top,
+  pillRect.left - x0,
+  pillRect.top - y0,
         pillRect.width,
         pillRect.height,
         pillRadius,
@@ -661,9 +657,9 @@ export const exportDiagramPDF = async (
       const dRect = dividerEl.getBoundingClientRect();
       const divStyle = getComputedStyle(dividerEl);
       const divider = document.createElementNS(NS, 'line');
-      const yPos = dRect.top - containerRect.top + parsePx(divStyle.borderTopWidth, 1) / 2;
-      divider.setAttribute('x1', `${dRect.left - containerRect.left}`);
-      divider.setAttribute('x2', `${dRect.right - containerRect.left}`);
+  const yPos = dRect.top - y0 + parsePx(divStyle.borderTopWidth, 1) / 2;
+  divider.setAttribute('x1', `${dRect.left - x0}`);
+  divider.setAttribute('x2', `${dRect.right - x0}`);
       divider.setAttribute('y1', `${yPos}`);
       divider.setAttribute('y2', `${yPos}`);
       divider.setAttribute('stroke', divStyle.borderTopColor || '#d1d9e0');
@@ -689,8 +685,8 @@ export const exportDiagramPDF = async (
       const hintStroke = hStyle.borderTopColor || '#90caf9';
       const hintStrokeWidth = parsePx(hStyle.borderTopWidth, 1);
       const hintBox = roundedRect(
-        hRect.left - containerRect.left,
-        hRect.top - containerRect.top,
+  hRect.left - x0,
+  hRect.top - y0,
         hRect.width,
         hRect.height,
         hintRadius,
@@ -703,130 +699,94 @@ export const exportDiagramPDF = async (
     }
   });
 
-  exportSvg.appendChild(domLayer);
+  // Legend container and contents
+  const legendWrapper = containerEl.querySelector('[data-export="legend"]') as HTMLElement | null;
+  if (legendWrapper) {
+    const legendRect = legendWrapper.getBoundingClientRect();
+    const legendStyle = getComputedStyle(legendWrapper);
+    const legendRadius = parsePx(legendStyle.borderRadius, 12);
+    const legendStroke = legendStyle.borderTopColor || legendStyle.borderColor || '#d1d9e0';
+    const legendStrokeWidth = parsePx(legendStyle.borderTopWidth || legendStyle.borderWidth, 1);
+  const lx = legendRect.left - x0;
+  const ly = legendRect.top - y0;
 
-  // Append the diagram by cloning the existing SVG (keeps paths etc.)
+    const legendShadow1 = roundedRect(lx, ly, legendRect.width, legendRect.height, legendRadius, '#000000');
+    legendShadow1.setAttribute('fill-opacity', '0.04');
+    legendShadow1.setAttribute('transform', 'translate(0,1)');
+    domLayer.appendChild(legendShadow1);
+    const legendShadow2 = roundedRect(lx, ly, legendRect.width, legendRect.height, legendRadius, '#000000');
+    legendShadow2.setAttribute('fill-opacity', '0.025');
+    legendShadow2.setAttribute('transform', 'translate(0,2)');
+    domLayer.appendChild(legendShadow2);
+
+    const legendBody = roundedRect(
+      lx,
+      ly,
+      legendRect.width,
+      legendRect.height,
+      legendRadius,
+      legendStyle.backgroundColor || 'rgba(255,255,255,0.5)',
+      legendStroke,
+      legendStrokeWidth,
+    );
+    domLayer.appendChild(legendBody);
+
+    const legendSwatches = Array.from(legendWrapper.querySelectorAll('[data-export="legend-swatch"]')) as HTMLElement[];
+    legendSwatches.forEach((swatch) => {
+      const swRect = swatch.getBoundingClientRect();
+      const swStyle = getComputedStyle(swatch);
+      const swRadius = parsePx(swStyle.borderRadius, swRect.height / 2);
+      const sw = roundedRect(
+  swRect.left - x0,
+  swRect.top - y0,
+        swRect.width,
+        swRect.height,
+        swRadius,
+        swStyle.backgroundColor || '#90caf9',
+      );
+      domLayer.appendChild(sw);
+    });
+
+    const legendArrows = Array.from(legendWrapper.querySelectorAll('svg[data-export="legend-arrow"]')) as SVGSVGElement[];
+    legendArrows.forEach((arrow) => {
+      const arrowRect = arrow.getBoundingClientRect();
+      const arrowClone = arrow.cloneNode(true) as SVGSVGElement;
+  arrowClone.setAttribute('x', `${arrowRect.left - x0}`);
+  arrowClone.setAttribute('y', `${arrowRect.top - y0}`);
+      arrowClone.setAttribute('width', `${arrowRect.width}`);
+      arrowClone.setAttribute('height', `${arrowRect.height}`);
+      const arrowStyle = getComputedStyle(arrow);
+      if (arrowStyle.stroke && arrowStyle.stroke !== 'none') {
+        arrowClone.setAttribute('stroke', arrowStyle.stroke);
+      }
+      if (arrowStyle.fill && arrowStyle.fill !== 'none') {
+        arrowClone.setAttribute('fill', arrowStyle.fill);
+      }
+      if (arrowStyle.strokeWidth && arrowStyle.strokeWidth !== 'none') {
+        arrowClone.setAttribute('stroke-width', arrowStyle.strokeWidth);
+      }
+      arrowClone.setAttribute('stroke-linecap', 'round');
+      arrowClone.setAttribute('stroke-linejoin', 'round');
+      domLayer.appendChild(arrowClone);
+    });
+
+    const legendTexts = Array.from(legendWrapper.querySelectorAll('[data-export="legend-text"]')) as HTMLElement[];
+    legendTexts.forEach((textEl) => {
+      domLayer.appendChild(createTextFromElement(textEl));
+    });
+  }
+
+  // Append the diagram by cloning the existing SVG (keeps paths etc.) UNDER the DOM layer
+  // so cards/text render above connectors like on the live page
   const diagramClone = svgElement.cloneNode(true) as SVGSVGElement;
-  diagramClone.setAttribute('x', '0');
-  diagramClone.setAttribute('y', '0');
+  const svgRectAbs = svgElement.getBoundingClientRect();
+  diagramClone.setAttribute('x', `${svgRectAbs.left - x0}`);
+  diagramClone.setAttribute('y', `${svgRectAbs.top - y0}`);
   // Prepare the diagram clone for vector PDF: strip filters, materialize arrows
   stripUnsupportedAndReplaceMarkers(diagramClone);
   exportSvg.appendChild(diagramClone);
-
-  // Build vector caption group
-  const captionGroup = document.createElementNS(NS, 'g');
-  captionGroup.setAttribute('transform', `translate(0, ${baseHeight})`);
-
-  // Background (solid white to avoid semi-transparent rasterization)
-  const bg = document.createElementNS(NS, 'rect');
-  bg.setAttribute('x', '0');
-  bg.setAttribute('y', '0');
-  bg.setAttribute('width', `${baseWidth}`);
-  bg.setAttribute('height', `${captionContentHeight}`);
-  bg.setAttribute('fill', '#ffffff');
-  captionGroup.appendChild(bg);
-
-  // Title
-  const titleText = document.createElementNS(NS, 'text');
-  titleText.setAttribute('x', `${captionPaddingX}`);
-  titleText.setAttribute('y', `${captionPaddingY + captionLine}`);
-  titleText.setAttribute('fill', '#1a2332');
-  titleText.setAttribute('font-size', '13');
-  titleText.setAttribute('font-weight', '700');
-  titleText.setAttribute('font-family', FONT_STACK);
-  titleText.textContent = legendTitle;
-  captionGroup.appendChild(titleText);
-
-  // Legend row
-  const legendY = captionPaddingY + captionLine + 16;
-  const columns = legendItems.length;
-  const effectiveWidth = baseWidth - 2 * captionPaddingX;
-  const colWidth = effectiveWidth / columns;
-  // approximate text width to position arrow and right label
-  const approxTextWidth = (s: string, fontSize = 12) => Math.round(s.length * fontSize * 0.6);
-  legendItems.forEach((it, i) => {
-    const cx = captionPaddingX + i * colWidth;
-    const swatch = document.createElementNS(NS, 'rect');
-    swatch.setAttribute('x', `${cx}`);
-    swatch.setAttribute('y', `${legendY}`);
-    swatch.setAttribute('width', `${legendSwatchW}`);
-    swatch.setAttribute('height', `${legendSwatchH}`);
-    swatch.setAttribute('rx', `${legendSwatchH / 2}`);
-    swatch.setAttribute('fill', it.color);
-    captionGroup.appendChild(swatch);
-
-    const baseX = cx + legendSwatchW + legendItemGap;
-    const baseY = legendY + legendSwatchH; // baseline for text
-
-    // Left (bold)
-    const left = document.createElementNS(NS, 'text');
-    left.setAttribute('x', `${baseX}`);
-    left.setAttribute('y', `${baseY}`);
-    left.setAttribute('fill', '#37474f');
-    left.setAttribute('font-size', '12');
-    left.setAttribute('font-family', FONT_STACK);
-    left.setAttribute('font-weight', '700');
-    left.textContent = it.left;
-    captionGroup.appendChild(left);
-
-    // Arrow icon (vector)
-    const leftW = approxTextWidth(it.left, 12);
-    const ax = baseX + leftW + 6;
-    const ay = baseY - 6; // center vertically around text baseline
-    const arrow = document.createElementNS(NS, 'path');
-    // small right arrow with chevron head
-    const arrowW = 16;
-    const arrowH = 6;
-    const lineStartX = ax;
-    const lineEndX = ax + arrowW - 6;
-    const cy = ay + arrowH / 2;
-    const d = `M ${lineStartX} ${cy} L ${lineEndX} ${cy} M ${lineEndX - 4} ${cy - 4} L ${lineEndX} ${cy} L ${lineEndX - 4} ${cy + 4}`;
-    arrow.setAttribute('d', d);
-    arrow.setAttribute('stroke', '#607d8b');
-    arrow.setAttribute('stroke-width', '2');
-    arrow.setAttribute('fill', 'none');
-    arrow.setAttribute('stroke-linecap', 'round');
-    arrow.setAttribute('stroke-linejoin', 'round');
-    captionGroup.appendChild(arrow);
-
-    // Right (normal)
-    const right = document.createElementNS(NS, 'text');
-    right.setAttribute('x', `${ax + arrowW + 4}`);
-    right.setAttribute('y', `${baseY}`);
-    right.setAttribute('fill', '#37474f');
-    right.setAttribute('font-size', '12');
-    right.setAttribute('font-family', FONT_STACK);
-    right.textContent = it.right;
-    captionGroup.appendChild(right);
-  });
-
-  // Paragraph
-  const para = document.createElementNS(NS, 'text');
-  para.setAttribute('x', `${captionPaddingX}`);
-  para.setAttribute('y', `${legendY + legendSwatchH + captionGap + captionLine}`);
-  para.setAttribute('fill', '#1a2332');
-  para.setAttribute('font-size', '12');
-  para.setAttribute('font-family', FONT_STACK);
-  paragraphLines.forEach((ln, idx) => {
-    const tspan = document.createElementNS(NS, 'tspan');
-    tspan.setAttribute('x', `${captionPaddingX}`);
-    tspan.setAttribute('dy', idx === 0 ? '0' : `${captionLine}`);
-    tspan.textContent = ln;
-    para.appendChild(tspan);
-  });
-  captionGroup.appendChild(para);
-
-  // Top divider to separate caption from diagram
-  const divider = document.createElementNS(NS, 'line');
-  divider.setAttribute('x1', '0');
-  divider.setAttribute('y1', '0');
-  divider.setAttribute('x2', `${baseWidth}`);
-  divider.setAttribute('y2', '0');
-  divider.setAttribute('stroke', '#e0e7ef');
-  divider.setAttribute('stroke-width', '1');
-  captionGroup.appendChild(divider);
-
-  exportSvg.appendChild(captionGroup);
+  // Now place reconstructed DOM layer on top (cards, text, legend)
+  exportSvg.appendChild(domLayer);
 
   // Serialize composed SVG and send to server to render via pdfkit (vector)
   const serializer = new XMLSerializer();
@@ -835,7 +795,7 @@ export const exportDiagramPDF = async (
   const res = await fetch('/api/export-figura02', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ svg: source, width: baseWidth, height: totalHeight, filename: name }),
+  body: JSON.stringify({ svg: source, width: baseWidth, height: baseHeight, filename: name }),
   });
   if (!res.ok) {
     const info = await res.json().catch(() => ({}));
@@ -1400,7 +1360,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
   );
 
   return (
-    <section aria-label="Figura 2 – Variáveis, indicadores e decisões agroclimáticas" className="w-full bg-gradient-to-br from-[#fafbfc] to-[#f5f7fa] py-12">
+  <section aria-label="Figura 2 – Variáveis, indicadores e decisões agroclimáticas" className="w-full bg-linear-to-br from-[#fafbfc] to-[#f5f7fa] py-12">
   <div className="mx-auto flex w-full flex-col gap-8 px-4 sm:px-6 lg:px-8 overflow-x-auto">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between border-b-2 border-[#d1d9e0] pb-6">
           <header className="max-w-3xl space-y-3">
@@ -1666,44 +1626,94 @@ export default function Figure02_Encadeamento(): React.ReactElement {
             </div>
           </section>
 
-          <footer className="col-span-full border-t-2 border-[#d1d9e0] pt-5 space-y-3 bg-white/50 rounded-lg px-6 py-4">
+          <footer
+            className="col-span-full border-t-2 border-[#d1d9e0] pt-5 space-y-3 bg-white/50 rounded-lg px-6 py-4"
+            data-export="legend"
+          >
             <div className="mb-2">
-              <h3 className="text-sm font-bold text-[#1a2332] mb-2">Cores dos conectores (por grupo)</h3>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs text-[#37474f]">
-              <li className="flex items-center gap-2">
-                <span className="inline-block h-1.5 w-10 rounded-full" style={{ backgroundColor: getStrokeByTarget('et0') }} />
-                <span className="inline-flex items-center gap-1.5">
-                  <strong>Grupo ET₀</strong>
-                  <ArrowRight size={14} strokeWidth={2.5} className="text-[#607d8b]" aria-hidden="true" />
-                  <span>Decisão de irrigação (D1)</span>
-                </span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="inline-block h-1.5 w-10 rounded-full" style={{ backgroundColor: getStrokeByTarget('bh') }} />
-                <span className="inline-flex items-center gap-1.5">
-                  <strong>Grupo BH</strong>
-                  <ArrowRight size={14} strokeWidth={2.5} className="text-[#607d8b]" aria-hidden="true" />
-                  <span>Planejamento operacional (D3)</span>
-                </span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="inline-block h-1.5 w-10 rounded-full" style={{ backgroundColor: getStrokeByTarget('gdd') }} />
-                <span className="inline-flex items-center gap-1.5">
-                  <strong>Grupo GDD</strong>
-                  <ArrowRight size={14} strokeWidth={2.5} className="text-[#607d8b]" aria-hidden="true" />
-                  <span>Manejo fitossanitário (D2)</span>
-                </span>
-              </li>
-            </ul>
-          </div>
-          <p id="fig2-caption" className="text-sm text-[#1a2332] leading-6">
-            <strong className="text-[#1565c0]">Legenda:</strong> Fluxo em duas etapas — (1) Variáveis
-            <ArrowRight size={14} strokeWidth={2.5} className="inline mx-1 align-[-1px] text-[#607d8b]" aria-hidden="true" />
-            Indicadores; (2) Indicadores
-            <ArrowRight size={14} strokeWidth={2.5} className="inline mx-1 align-[-1px] text-[#607d8b]" aria-hidden="true" />
-            Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
-          </p>
-        </footer>
+              <h3 className="text-sm font-bold text-[#1a2332] mb-2" data-export="legend-text">
+                Cores dos conectores (por grupo)
+              </h3>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs text-[#37474f]">
+                <li className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-1.5 w-10 rounded-full"
+                    style={{ backgroundColor: getStrokeByTarget('et0') }}
+                    data-export="legend-swatch"
+                  />
+                  <span className="inline-flex items-center gap-1.5">
+                    <strong data-export="legend-text">Grupo ET₀</strong>
+                    <ArrowRight
+                      size={14}
+                      strokeWidth={2.5}
+                      className="text-[#607d8b]"
+                      aria-hidden="true"
+                      data-export="legend-arrow"
+                    />
+                    <span data-export="legend-text">Decisão de irrigação (D1)</span>
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-1.5 w-10 rounded-full"
+                    style={{ backgroundColor: getStrokeByTarget('bh') }}
+                    data-export="legend-swatch"
+                  />
+                  <span className="inline-flex items-center gap-1.5">
+                    <strong data-export="legend-text">Grupo BH</strong>
+                    <ArrowRight
+                      size={14}
+                      strokeWidth={2.5}
+                      className="text-[#607d8b]"
+                      aria-hidden="true"
+                      data-export="legend-arrow"
+                    />
+                    <span data-export="legend-text">Planejamento operacional (D3)</span>
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-1.5 w-10 rounded-full"
+                    style={{ backgroundColor: getStrokeByTarget('gdd') }}
+                    data-export="legend-swatch"
+                  />
+                  <span className="inline-flex items-center gap-1.5">
+                    <strong data-export="legend-text">Grupo GDD</strong>
+                    <ArrowRight
+                      size={14}
+                      strokeWidth={2.5}
+                      className="text-[#607d8b]"
+                      aria-hidden="true"
+                      data-export="legend-arrow"
+                    />
+                    <span data-export="legend-text">Manejo fitossanitário (D2)</span>
+                  </span>
+                </li>
+              </ul>
+            </div>
+            <p id="fig2-caption" className="text-sm text-[#1a2332] leading-6" data-export="legend-paragraph">
+              <strong className="text-[#1565c0]" data-export="legend-text">Legenda:</strong>
+              <span data-export="legend-text"> Fluxo em duas etapas — (1) Variáveis</span>
+              <ArrowRight
+                size={14}
+                strokeWidth={2.5}
+                className="inline mx-1 align-[-1px] text-[#607d8b]"
+                aria-hidden="true"
+                data-export="legend-arrow"
+              />
+              <span data-export="legend-text">Indicadores; (2) Indicadores</span>
+              <ArrowRight
+                size={14}
+                strokeWidth={2.5}
+                className="inline mx-1 align-[-1px] text-[#607d8b]"
+                aria-hidden="true"
+                data-export="legend-arrow"
+              />
+              <span data-export="legend-text">
+                Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
+              </span>
+            </p>
+          </footer>
         </div>
         </div>
       </div>

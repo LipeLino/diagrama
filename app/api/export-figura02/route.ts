@@ -20,6 +20,9 @@ export async function POST(req: Request): Promise<Response> {
   const SVGtoPDF = cjsRequire('svg-to-pdfkit');
 
   const doc = new PDFDocument({ size: [wPt, hPt], margin: 0 });
+  // Ensure the PDF page has a solid white background (avoids dark-mode viewers turning caption black)
+  doc.rect(0, 0, wPt, hPt).fill('#FFFFFF');
+  doc.fillColor('#000000');
 
     // Try to register site fonts if available (optional). If missing, pdfkit falls back to Helvetica.
     try {
@@ -28,15 +31,19 @@ export async function POST(req: Request): Promise<Response> {
       const fontsDir = path.join(process.cwd(), 'public', 'fonts');
       const interRegular = path.join(fontsDir, 'Inter-Regular.ttf');
       const interBold = path.join(fontsDir, 'Inter-Bold.ttf');
+      const interSemi = path.join(fontsDir, 'Inter-SemiBold.ttf');
       if (fs.existsSync(interRegular)) {
         doc.registerFont('Inter-Regular', interRegular);
       }
       if (fs.existsSync(interBold)) {
         doc.registerFont('Inter-Bold', interBold);
       }
+      if (fs.existsSync(interSemi)) {
+        doc.registerFont('Inter-SemiBold', interSemi);
+      }
     } catch {}
 
-    const chunks: Uint8Array[] = [];
+  const chunks: Uint8Array[] = [];
     doc.on('data', (c: Uint8Array) => chunks.push(c));
     const done = new Promise<Buffer>((resolve) => {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -58,7 +65,9 @@ export async function POST(req: Request): Promise<Response> {
       preserveAspectRatio: 'none',
       fontCallback: (family: string, bold: boolean) => {
         const f = (family || '').toLowerCase();
-        if (f.includes('inter')) return bold ? 'Inter-Bold' : 'Inter-Regular';
+        if (f.includes('inter-semibold') || f.includes('inter-semi')) return 'Inter-SemiBold';
+        if (f.includes('inter-bold')) return 'Inter-Bold';
+        if (f.includes('inter-regular') || f.trim() === 'inter') return bold ? 'Inter-Bold' : 'Inter-Regular';
         // Default fallback keeps Helvetica
         return undefined as unknown as string | undefined;
       },
