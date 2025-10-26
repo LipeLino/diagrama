@@ -266,7 +266,11 @@ export const exportDiagramPDF = async (
   const NS = 'http://www.w3.org/2000/svg';
   const exportSvg = document.createElementNS(NS, 'svg');
   exportSvg.setAttribute('xmlns', NS);
-  exportSvg.setAttribute('width', `${baseWidth}`);
+  // Add a small padding around the entire diagram so background isn't flush to content
+  const PADDING = 8; // px on each side
+  const paddedWidth = baseWidth + PADDING * 2;
+  const paddedHeight = baseHeight + PADDING * 2;
+  exportSvg.setAttribute('width', `${paddedWidth}`);
   // defs: simple gradients used for pills and lane backgrounds
   const defs = document.createElementNS(NS, 'defs');
   // Horizontal light blue pill gradient
@@ -308,15 +312,17 @@ export const exportDiagramPDF = async (
   const pageBg = document.createElementNS(NS, 'rect');
   pageBg.setAttribute('x', '0');
   pageBg.setAttribute('y', '0');
-  pageBg.setAttribute('width', `${baseWidth}`);
-  pageBg.setAttribute('height', `${baseHeight}`);
+  pageBg.setAttribute('width', `${paddedWidth}`);
+  pageBg.setAttribute('height', `${paddedHeight}`);
   pageBg.setAttribute('fill', '#ffffff');
   exportSvg.appendChild(pageBg);
-  exportSvg.setAttribute('height', `${baseHeight}`);
-  exportSvg.setAttribute('viewBox', `0 0 ${baseWidth} ${baseHeight}`);
+  exportSvg.setAttribute('height', `${paddedHeight}`);
+  exportSvg.setAttribute('viewBox', `0 0 ${paddedWidth} ${paddedHeight}`);
 
   // 1) Rebuild the HTML cards, lanes, and legend as vector shapes inside the SVG
   const domLayer = document.createElementNS(NS, 'g');
+  // Shift the entire reconstructed DOM layer by the padding
+  domLayer.setAttribute('transform', `translate(${PADDING},${PADDING})`);
 
   const measurementCanvas = document.createElement('canvas');
   const measureCtx = measurementCanvas.getContext('2d');
@@ -450,7 +456,7 @@ export const exportDiagramPDF = async (
 
   type TextOptions = { align?: 'left' | 'center'; color?: string };
 
-  const createTextFromElement = (el: HTMLElement, options: TextOptions = {}) => {
+  const createTextFromElement = (el: HTMLElement, options: TextOptions = {}): SVGTextElement | null => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     const paddingLeft = parsePx(style.paddingLeft, 0);
@@ -461,28 +467,82 @@ export const exportDiagramPDF = async (
     const align = options.align ?? (style.textAlign === 'center' ? 'center' : 'left');
 
     const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!raw) {
+      console.warn('createTextFromElement: empty text content for', el);
+      return null;
+    }
     const transformed = applyTextTransform(raw, style.textTransform || 'none');
-    const maxWidth = Math.max(0, rect.width - paddingLeft - paddingRight);
-    const lines = wrapTextExact(transformed, maxWidth, style);
+    // Primary width from the element box; if unreliable (0/very small/NaN), fallback to the host card width.
+    let maxWidth = Math.max(0, rect.width - paddingLeft - paddingRight);
+  const host = el.closest('article[data-export-card]') as HTMLElement | null;
+  const hostRect = host?.getBoundingClientRect();
+  const hostStyle = host ? getComputedStyle(host) : null;
+    if ((!Number.isFinite(maxWidth) || maxWidth < 4) && hostRect) {
+      maxWidth = Math.max(80, hostRect.width - 32); // generous inner width
+    }
+    let lines = wrapTextExact(transformed, maxWidth, style);
+    // Safety: if wrapping produced no lines due to a zero/NaN width edge case,
+    // render a single unwrapped line so content never disappears in the PDF.
+    if (!lines || lines.length === 0) {
+      console.warn('createTextFromElement: wrapping produced no lines, using unwrapped fallback for', raw);
+      lines = [transformed];
+    }
 
     const textElement = document.createElementNS(NS, 'text');
+    // Compute X/Y with robust fallbacks; ensure we never emit NaN which would place text at 0,0 in some renderers.
+    const safe = (v: number | undefined, fb: number) => (Number.isFinite(v as number) ? (v as number) : fb);
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    // If element width is unreliable, anchor to host padding area.
+    const useHostX = !!hostRect && (!Number.isFinite(rect.width) || rect.width < 4);
+    const rectLeft = safe(rect.left, (hostRect ? hostRect.left : x0 + 16));
+    const rectTop = safe(rect.top, (hostRect ? hostRect.top : y0 + 16));
+    const hostPadLeft = parsePx(hostStyle?.paddingLeft || null, 16);
+    const hostPadRight = parsePx(hostStyle?.paddingRight || null, 16);
+    const hostPadTop = parsePx(hostStyle?.paddingTop || null, 16);
+    const hostPadBottom = parsePx(hostStyle?.paddingBottom || null, 16);
+    const baseLeft = useHostX ? (safe(hostRect?.left, x0 + 16) - x0 + hostPadLeft) : (rectLeft - x0 + paddingLeft);
     const anchorX = align === 'center'
-      ? rect.left - x0 + paddingLeft + maxWidth / 2
-      : rect.left - x0 + paddingLeft;
-    const topY = rect.top - y0 + paddingTop;
-    const baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
+      ? baseLeft + maxWidth / 2
+      : baseLeft;
+    const topY = rectTop - y0 + paddingTop;
+    let baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
+    if (!Number.isFinite(baseline)) {
+      // Fallback baseline roughly one line below the host top.
+      const hostTop = safe(hostRect?.top, y0 + 16);
+      baseline = (hostTop - y0) + hostPadTop + fontSize;
+    }
 
-    textElement.setAttribute('x', `${anchorX}`);
-    textElement.setAttribute('y', `${baseline}`);
+    // Extra safety for card descriptions: ensure text sits inside the card bounds even if layout metrics glitch
+    if (el.getAttribute('data-export') === 'card-description' && hostRect) {
+      const minX = (hostRect.left - x0) + hostPadLeft;
+      const maxX = (hostRect.right - x0) - hostPadRight;
+      const minY = (hostRect.top - y0) + hostPadTop + fontSize * 0.9;
+      const maxY = (hostRect.bottom - y0) - hostPadBottom - fontSize * 0.5;
+      // reassign clamped values
+      const clampedX = clamp(anchorX, minX, maxX);
+      const clampedY = clamp(baseline, minY, maxY);
+      // Apply the clamped coordinates
+      // Note: we can't change 'anchorX' const; recompute local variables instead
+      // We'll set attributes using these values below
+      (textElement as any)._anchorX = clampedX;
+      (textElement as any)._baselineY = clampedY;
+    }
+
+  const finalX = (textElement as any)._anchorX ?? anchorX;
+  const finalY = (textElement as any)._baselineY ?? baseline;
+  textElement.setAttribute('x', `${finalX}`);
+  textElement.setAttribute('y', `${finalY}`);
     textElement.setAttribute('fill', options.color ?? style.color ?? COLORS.text);
     textElement.setAttribute('font-size', `${fontSize}`);
     // Map to concrete Inter font files to preserve exact weights in PDF
     const rawFamily = style.fontFamily || FONT_STACK;
-    const primaryFamily = rawFamily.split(',')[0].replace(/['"]/g, '').trim();
+    const primaryCandidate = rawFamily.split(',')[0]?.replace(/['"]/g, '').trim();
+    const safePrimary = primaryCandidate && primaryCandidate.toLowerCase() !== 'undefined' ? primaryCandidate : '';
     const fw = (style.fontWeight || '400').toString();
     const fwNum = parseInt(fw, 10);
-    let svgFamily = primaryFamily || 'Inter';
-    if (primaryFamily.toLowerCase().includes('inter')) {
+    let svgFamily = safePrimary || 'Inter-Regular';
+    const primaryLower = safePrimary.toLowerCase();
+    if (primaryLower.includes('inter')) {
       if (Number.isFinite(fwNum)) {
         if (fwNum >= 700) svgFamily = 'Inter-Bold';
         else if (fwNum >= 600) svgFamily = 'Inter-SemiBold';
@@ -492,6 +552,8 @@ export const exportDiagramPDF = async (
       } else {
         svgFamily = 'Inter-Regular';
       }
+    } else if (!safePrimary) {
+      svgFamily = 'Inter-Regular';
     }
     textElement.setAttribute('font-family', svgFamily);
     textElement.setAttribute('font-weight', fw);
@@ -508,7 +570,7 @@ export const exportDiagramPDF = async (
 
     lines.forEach((line, index) => {
       const tspan = document.createElementNS(NS, 'tspan');
-      tspan.setAttribute('x', `${anchorX}`);
+      tspan.setAttribute('x', `${(textElement as any)._anchorX ?? anchorX}`);
       if (index > 0) {
         tspan.setAttribute('dy', `${lineHeight}`);
       }
@@ -552,7 +614,9 @@ export const exportDiagramPDF = async (
     const bar = roundedRect(x, y, rect.width, rect.height, 12, COLORS.laneHead);
     domLayer.appendChild(bar);
     const text = createTextFromElement(header, { align: 'center', color: '#ffffff' });
-    domLayer.appendChild(text);
+    if (text) {
+      domLayer.appendChild(text);
+    }
   });
 
   // Cards and inner content
@@ -623,12 +687,83 @@ export const exportDiagramPDF = async (
 
     const titleEl = cardEl.querySelector('[data-export="card-title"]') as HTMLElement | null;
     if (titleEl) {
-      domLayer.appendChild(createTextFromElement(titleEl));
+      const textEl = createTextFromElement(titleEl);
+      if (textEl) {
+        domLayer.appendChild(textEl);
+      }
     }
 
     const descriptionEl = cardEl.querySelector('[data-export="card-description"]') as HTMLElement | null;
     if (descriptionEl) {
-      domLayer.appendChild(createTextFromElement(descriptionEl));
+      // Prefer the generic path; if layout metrics are unreliable (0,0 or too narrow), use a host-anchored fallback.
+      const dRect = descriptionEl.getBoundingClientRect();
+      const unreliable = !Number.isFinite(dRect.width) || dRect.width < 4 || (dRect.left === 0 && dRect.top === 0);
+      if (!unreliable) {
+        const textEl = createTextFromElement(descriptionEl);
+        if (textEl) domLayer.appendChild(textEl);
+      } else {
+        // Host-anchored placement fallback for stubborn cards (e.g., GDD and Armazenamento)
+        const hostStyle = getComputedStyle(cardEl);
+        const descStyle = getComputedStyle(descriptionEl);
+        const hostPadLeft = parsePx(hostStyle.paddingLeft, 16);
+        const hostPadRight = parsePx(hostStyle.paddingRight, 16);
+        const hostPadTop = parsePx(hostStyle.paddingTop, 16);
+        const marginTop = parsePx(descStyle.marginTop, 0);
+        const fontSize = parsePx(descStyle.fontSize, 13);
+        const lineHeight = getLineHeightPx(descStyle, fontSize);
+        const maxWidth = Math.max(80, rect.width - hostPadLeft - hostPadRight);
+        // Prefer anchoring below the title if present; otherwise from card padding top
+        const titleRect = titleEl?.getBoundingClientRect();
+        const anchorX = rect.left - x0 + hostPadLeft;
+        const topY = (titleRect ? titleRect.bottom - y0 : rect.top - y0 + hostPadTop) + marginTop;
+        const baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
+
+        const raw = (descriptionEl.textContent || '').replace(/\s+/g, ' ').trim();
+        if (raw) {
+          const transformed = applyTextTransform(raw, descStyle.textTransform || 'none');
+          let lines = wrapTextExact(transformed, maxWidth, descStyle);
+          if (!lines || lines.length === 0) lines = [transformed];
+          const textElement = document.createElementNS(NS, 'text');
+          textElement.setAttribute('x', `${anchorX}`);
+          textElement.setAttribute('y', `${baseline}`);
+          textElement.setAttribute('fill', descStyle.color || COLORS.text);
+          textElement.setAttribute('font-size', `${fontSize}`);
+          // Map concrete Inter font family for PDF reliability
+          const rawFamily = descStyle.fontFamily || FONT_STACK;
+          const primaryCandidate = rawFamily.split(',')[0]?.replace(/['"]/g, '').trim();
+          const safePrimary = primaryCandidate && primaryCandidate.toLowerCase() !== 'undefined' ? primaryCandidate : '';
+          const fw = (descStyle.fontWeight || '400').toString();
+          const fwNum = parseInt(fw, 10);
+          let svgFamily = safePrimary || 'Inter-Regular';
+          const primaryLower = safePrimary.toLowerCase();
+          if (primaryLower.includes('inter')) {
+            if (Number.isFinite(fwNum)) {
+              if (fwNum >= 700) svgFamily = 'Inter-Bold';
+              else if (fwNum >= 600) svgFamily = 'Inter-SemiBold';
+              else svgFamily = 'Inter-Regular';
+            } else if (fw.toLowerCase() === 'bold') {
+              svgFamily = 'Inter-Bold';
+            } else {
+              svgFamily = 'Inter-Regular';
+            }
+          } else if (!safePrimary) {
+            svgFamily = 'Inter-Regular';
+          }
+          textElement.setAttribute('font-family', svgFamily);
+          textElement.setAttribute('font-weight', fw);
+          textElement.setAttribute('font-style', descStyle.fontStyle || 'normal');
+          textElement.setAttribute('dominant-baseline', 'alphabetic');
+          textElement.setAttribute('text-rendering', 'geometricPrecision');
+          lines.forEach((line, index) => {
+            const tspan = document.createElementNS(NS, 'tspan');
+            tspan.setAttribute('x', `${anchorX}`);
+            if (index > 0) tspan.setAttribute('dy', `${lineHeight}`);
+            tspan.textContent = line;
+            textElement.appendChild(tspan);
+          });
+          domLayer.appendChild(textElement);
+        }
+      }
     }
 
     const unitEl = cardEl.querySelector('[data-export="unit-pill"]') as HTMLElement | null;
@@ -649,7 +784,10 @@ export const exportDiagramPDF = async (
         pillStrokeWidth,
       );
       domLayer.appendChild(pill);
-      domLayer.appendChild(createTextFromElement(unitEl));
+      const unitText = createTextFromElement(unitEl);
+      if (unitText) {
+        domLayer.appendChild(unitText);
+      }
     }
 
     const dividerEl = cardEl.querySelector('[data-export="card-divider"]') as HTMLElement | null;
@@ -669,12 +807,18 @@ export const exportDiagramPDF = async (
 
     const detailIcons = Array.from(cardEl.querySelectorAll('[data-export="detail-icon"]')) as HTMLElement[];
     detailIcons.forEach((iconEl) => {
-      domLayer.appendChild(createTextFromElement(iconEl, { align: 'center' }));
+      const iconText = createTextFromElement(iconEl, { align: 'center' });
+      if (iconText) {
+        domLayer.appendChild(iconText);
+      }
     });
 
     const detailTexts = Array.from(cardEl.querySelectorAll('[data-export="detail-text"]')) as HTMLElement[];
     detailTexts.forEach((detailEl) => {
-      domLayer.appendChild(createTextFromElement(detailEl));
+      const detailText = createTextFromElement(detailEl);
+      if (detailText) {
+        domLayer.appendChild(detailText);
+      }
     });
 
     const hintEl = cardEl.querySelector('[data-export="card-hint"]') as HTMLElement | null;
@@ -695,7 +839,10 @@ export const exportDiagramPDF = async (
         hintStrokeWidth,
       );
       domLayer.appendChild(hintBox);
-      domLayer.appendChild(createTextFromElement(hintEl));
+      const hintText = createTextFromElement(hintEl);
+      if (hintText) {
+        domLayer.appendChild(hintText);
+      }
     }
   });
 
@@ -725,7 +872,9 @@ export const exportDiagramPDF = async (
       legendRect.width,
       legendRect.height,
       legendRadius,
-      legendStyle.backgroundColor || 'rgba(255,255,255,0.5)',
+      // Force solid white caption background to avoid rgba() -> black fallbacks in svg-to-pdf
+      // and to ensure readability regardless of viewer theme.
+      '#ffffff',
       legendStroke,
       legendStrokeWidth,
     );
@@ -772,7 +921,10 @@ export const exportDiagramPDF = async (
 
     const legendTexts = Array.from(legendWrapper.querySelectorAll('[data-export="legend-text"]')) as HTMLElement[];
     legendTexts.forEach((textEl) => {
-      domLayer.appendChild(createTextFromElement(textEl));
+      const legendText = createTextFromElement(textEl);
+      if (legendText) {
+        domLayer.appendChild(legendText);
+      }
     });
   }
 
@@ -780,13 +932,14 @@ export const exportDiagramPDF = async (
   // so cards/text render above connectors like on the live page
   const diagramClone = svgElement.cloneNode(true) as SVGSVGElement;
   const svgRectAbs = svgElement.getBoundingClientRect();
-  diagramClone.setAttribute('x', `${svgRectAbs.left - x0}`);
-  diagramClone.setAttribute('y', `${svgRectAbs.top - y0}`);
+  // Also shift the original connector layer by the padding so it aligns with the DOM layer
+  diagramClone.setAttribute('x', `${svgRectAbs.left - x0 + PADDING}`);
+  diagramClone.setAttribute('y', `${svgRectAbs.top - y0 + PADDING}`);
   // Prepare the diagram clone for vector PDF: strip filters, materialize arrows
   stripUnsupportedAndReplaceMarkers(diagramClone);
-  exportSvg.appendChild(diagramClone);
-  // Now place reconstructed DOM layer on top (cards, text, legend)
+  // Place reconstructed DOM layer first (cards, text, legend), then connectors on TOP (arrows in front)
   exportSvg.appendChild(domLayer);
+  exportSvg.appendChild(diagramClone);
 
   // Serialize composed SVG and send to server to render via pdfkit (vector)
   const serializer = new XMLSerializer();
