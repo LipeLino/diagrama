@@ -28,42 +28,26 @@ export async function POST(req: Request): Promise<Response> {
     try {
       const fs = cjsRequire('fs') as typeof import('fs');
       const path = cjsRequire('path') as typeof import('path');
+
       const fontsDir = path.join(process.cwd(), 'public', 'fonts');
-      const interRegular = path.join(fontsDir, 'Inter-Regular.ttf');
-      const interBold = path.join(fontsDir, 'Inter-Bold.ttf');
-      const interSemi = path.join(fontsDir, 'Inter-SemiBold.ttf');
-      const interVariable = path.join(fontsDir, 'Inter-VariableFont_opsz,wght.ttf');
+      const fontFiles: Array<{ name: string; file: string }> = [
+        { name: 'Inter-400', file: 'Inter-Regular.ttf' },
+        { name: 'Inter-600', file: 'Inter-SemiBold.ttf' },
+        { name: 'Inter-700', file: 'Inter-Bold.ttf' },
+        { name: 'Roboto-400', file: 'Roboto-Regular.ttf' },
+      ];
 
-      const registerIfExists = (name: string, filePath: string) => {
+      fontFiles.forEach(({ name, file }) => {
+        const fullPath = path.join(fontsDir, file);
         try {
-          if (fs.existsSync(filePath)) {
-            doc.registerFont(name, filePath);
-            return true;
-          }
-        } catch (e) {
-          console.warn(`Font registration failed for ${name} -> ${filePath}:`, e);
+          const fontBuffer = fs.readFileSync(fullPath);
+          doc.registerFont(name, fontBuffer);
+        } catch (err) {
+          console.warn(`Font registration failed for ${name} (${fullPath}). Falling back to Helvetica.`, err);
         }
-        return false;
-      };
-
-      const registeredRegular = registerIfExists('Inter-Regular', interRegular);
-      const registeredBold = registerIfExists('Inter-Bold', interBold);
-      const registeredSemi = registerIfExists('Inter-SemiBold', interSemi);
-
-      // If discrete Inter TTFs are missing, alias the variable font under common names.
-      if (fs.existsSync(interVariable)) {
-        try {
-          if (!registeredRegular) doc.registerFont('Inter-Regular', interVariable);
-          if (!registeredSemi) doc.registerFont('Inter-SemiBold', interVariable);
-          if (!registeredBold) doc.registerFont('Inter-Bold', interVariable);
-          // Generic family alias for plain 'Inter'
-          doc.registerFont('Inter', interVariable);
-        } catch (e) {
-          console.warn('Inter variable font registration failed:', e);
-        }
-      }
+      });
     } catch (fontErr) {
-      console.warn('Inter font registration skipped:', fontErr);
+      console.warn('Custom font registration skipped:', fontErr);
     }
 
     const chunks: Uint8Array[] = [];
@@ -86,16 +70,15 @@ export async function POST(req: Request): Promise<Response> {
       width: wPt,
       height: hPt,
       preserveAspectRatio: 'none',
-      fontCallback: (family: string, bold: boolean) => {
-        const f = (family || '').toLowerCase();
-        if (f.includes('inter')) {
-          if (f.includes('semi')) return 'Inter-SemiBold';
-          if (f.includes('bold')) return 'Inter-Bold';
-          if (f.includes('regular') || f.trim() === 'inter') return bold ? 'Inter-Bold' : 'Inter-Regular';
-          return 'Inter-Regular';
-        }
-        // Safe fallback to a standard PDF font to avoid 'undefined' errors
-        return 'Helvetica';
+  fontCallback: (family: string, bold: boolean) => {
+        const normalized = (family || '').toLowerCase();
+        if (normalized.includes('inter-700')) return 'Inter-700';
+        if (normalized.includes('inter-600')) return 'Inter-600';
+        if (normalized.includes('inter-400') || normalized === 'inter') return bold ? 'Inter-700' : 'Inter-400';
+        if (normalized.includes('roboto-400') || normalized.includes('roboto')) return 'Roboto-400';
+        if (normalized.includes('helvetica')) return 'Helvetica';
+        // Default to Inter regular if available, otherwise Helvetica
+        return 'Inter-400';
       },
     };
     SVGtoPDFFn(doc, svg, 0, 0, options);

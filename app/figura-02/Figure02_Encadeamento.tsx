@@ -45,6 +45,65 @@ const COLORS = {
 // Prefer the same font stack as the site; PDF will map via server fontCallback when available
 const FONT_STACK = 'Inter, Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif';
 
+const FALLBACK_FONT_FAMILY = 'Roboto-400';
+const INTER_FONT_BY_WEIGHT: Record<number, string> = {
+  400: 'Inter-400',
+  600: 'Inter-600',
+  700: 'Inter-700',
+};
+
+const FALLBACK_GLYPH_REGEX = /[\u2080-\u2089\u0391-\u03A9\u03B1-\u03C9\u2200-\u22FF]/;
+
+const normalizeFontWeight = (fontWeightInput: string | number | undefined): number => {
+  if (typeof fontWeightInput === 'number') {
+    if (fontWeightInput >= 700) return 700;
+    if (fontWeightInput >= 600) return 600;
+    return 400;
+  }
+  const value = (fontWeightInput ?? '400').toString().trim().toLowerCase();
+  if (!value) return 400;
+  if (value === 'bold' || value === 'bolder') return 700;
+  if (value.includes('semi') || value === '600') return 600;
+  const parsed = parseInt(value, 10);
+  if (Number.isFinite(parsed)) {
+    if (parsed >= 700) return 700;
+    if (parsed >= 600) return 600;
+    return 400;
+  }
+  return 400;
+};
+
+const resolveSvgFontFamily = (fontWeight: number): string => INTER_FONT_BY_WEIGHT[fontWeight] ?? INTER_FONT_BY_WEIGHT[400];
+
+type TextRun = { text: string; fallback: boolean };
+
+const splitTextIntoRuns = (text: string): TextRun[] => {
+  if (!text) return [];
+  const chars = Array.from(text);
+  const runs: TextRun[] = [];
+  let currentText = '';
+  let currentFallback: boolean | null = null;
+  chars.forEach((ch) => {
+    const needsFallback = FALLBACK_GLYPH_REGEX.test(ch);
+    if (currentFallback === null) {
+      currentFallback = needsFallback;
+      currentText = ch;
+      return;
+    }
+    if (needsFallback === currentFallback) {
+      currentText += ch;
+      return;
+    }
+    runs.push({ text: currentText, fallback: currentFallback });
+    currentText = ch;
+    currentFallback = needsFallback;
+  });
+  if (currentText) {
+    runs.push({ text: currentText, fallback: currentFallback ?? false });
+  }
+  return runs;
+};
+
 // Unified 3-color scheme — same hues for Variables→Indicators and Indicators→Decisions
 // ET₀ deep blue, BH steel blue, GDD sky blue. Decisions reuse one of these hues to keep palette minimal.
 const STROKE_BY_TARGET = {
@@ -55,6 +114,8 @@ const STROKE_BY_TARGET = {
   d2: '#9B8BBE',  // Manejo shares GDD hue
   d3: '#7C9674',  // Planejamento shares BH hue
 } as const;
+
+const DEBUG_DESCRIPTIONS = false;
 
 function getStrokeByTarget(targetId: keyof typeof STROKE_BY_TARGET): string {
   return STROKE_BY_TARGET[targetId];
@@ -456,6 +517,49 @@ export const exportDiagramPDF = async (
 
   type TextOptions = { align?: 'left' | 'center'; color?: string };
 
+  type AnchoredTextElement = SVGTextElement & {
+    _anchorX?: number;
+    _baselineY?: number;
+  };
+
+  const populateTextNodeWithLines = (
+    textEl: SVGTextElement,
+    lines: string[],
+    anchorX: number,
+    lineHeight: number,
+    fontFamily: string,
+    fontWeight: string,
+    letterSpacing?: string,
+  ) => {
+    while (textEl.firstChild) {
+      textEl.removeChild(textEl.firstChild);
+    }
+    lines.forEach((line, lineIndex) => {
+      const runs = splitTextIntoRuns(line);
+      if (!runs.length) {
+        runs.push({ text: '', fallback: false });
+      }
+      runs.forEach((run, runIndex) => {
+        const tspan = document.createElementNS(NS, 'tspan');
+        if (runIndex === 0) {
+          tspan.setAttribute('x', `${anchorX}`);
+          if (lineIndex > 0) {
+            tspan.setAttribute('dy', `${lineHeight}`);
+          }
+        }
+        const family = run.fallback ? FALLBACK_FONT_FAMILY : fontFamily;
+        const weight = run.fallback ? '400' : fontWeight;
+        tspan.setAttribute('font-family', family);
+        tspan.setAttribute('font-weight', weight);
+        if (letterSpacing) {
+          tspan.setAttribute('letter-spacing', letterSpacing);
+        }
+        tspan.textContent = run.text;
+        textEl.appendChild(tspan);
+      });
+    });
+  };
+
   const createTextFromElement = (el: HTMLElement, options: TextOptions = {}): SVGTextElement | null => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
@@ -488,7 +592,7 @@ export const exportDiagramPDF = async (
       lines = [transformed];
     }
 
-    const textElement = document.createElementNS(NS, 'text');
+  const textElement = document.createElementNS(NS, 'text') as AnchoredTextElement;
     // Compute X/Y with robust fallbacks; ensure we never emit NaN which would place text at 0,0 in some renderers.
     const safe = (v: number | undefined, fb: number) => (Number.isFinite(v as number) ? (v as number) : fb);
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -524,39 +628,22 @@ export const exportDiagramPDF = async (
       // Apply the clamped coordinates
       // Note: we can't change 'anchorX' const; recompute local variables instead
       // We'll set attributes using these values below
-      (textElement as any)._anchorX = clampedX;
-      (textElement as any)._baselineY = clampedY;
+      textElement._anchorX = clampedX;
+      textElement._baselineY = clampedY;
     }
 
-  const finalX = (textElement as any)._anchorX ?? anchorX;
-  const finalY = (textElement as any)._baselineY ?? baseline;
+  const finalX = textElement._anchorX ?? anchorX;
+  const finalY = textElement._baselineY ?? baseline;
   textElement.setAttribute('x', `${finalX}`);
   textElement.setAttribute('y', `${finalY}`);
     textElement.setAttribute('fill', options.color ?? style.color ?? COLORS.text);
     textElement.setAttribute('font-size', `${fontSize}`);
     // Map to concrete Inter font files to preserve exact weights in PDF
-    const rawFamily = style.fontFamily || FONT_STACK;
-    const primaryCandidate = rawFamily.split(',')[0]?.replace(/['"]/g, '').trim();
-    const safePrimary = primaryCandidate && primaryCandidate.toLowerCase() !== 'undefined' ? primaryCandidate : '';
-    const fw = (style.fontWeight || '400').toString();
-    const fwNum = parseInt(fw, 10);
-    let svgFamily = safePrimary || 'Inter-Regular';
-    const primaryLower = safePrimary.toLowerCase();
-    if (primaryLower.includes('inter')) {
-      if (Number.isFinite(fwNum)) {
-        if (fwNum >= 700) svgFamily = 'Inter-Bold';
-        else if (fwNum >= 600) svgFamily = 'Inter-SemiBold';
-        else svgFamily = 'Inter-Regular';
-      } else if (fw.toLowerCase() === 'bold') {
-        svgFamily = 'Inter-Bold';
-      } else {
-        svgFamily = 'Inter-Regular';
-      }
-    } else if (!safePrimary) {
-      svgFamily = 'Inter-Regular';
-    }
+    const normalizedWeight = normalizeFontWeight(style.fontWeight || '400');
+    const svgFamily = resolveSvgFontFamily(normalizedWeight);
+    const weightString = `${normalizedWeight}`;
     textElement.setAttribute('font-family', svgFamily);
-    textElement.setAttribute('font-weight', fw);
+    textElement.setAttribute('font-weight', weightString);
     textElement.setAttribute('font-style', style.fontStyle || 'normal');
     textElement.setAttribute('dominant-baseline', 'alphabetic');
     textElement.setAttribute('text-rendering', 'geometricPrecision');
@@ -568,17 +655,107 @@ export const exportDiagramPDF = async (
       textElement.setAttribute('letter-spacing', letterSpacing);
     }
 
-    lines.forEach((line, index) => {
-      const tspan = document.createElementNS(NS, 'tspan');
-      tspan.setAttribute('x', `${(textElement as any)._anchorX ?? anchorX}`);
-      if (index > 0) {
-        tspan.setAttribute('dy', `${lineHeight}`);
-      }
-      tspan.textContent = line;
-      textElement.appendChild(tspan);
-    });
+    populateTextNodeWithLines(textElement, lines, textElement._anchorX ?? anchorX, lineHeight, svgFamily, weightString, letterSpacing && letterSpacing !== 'normal' ? letterSpacing : undefined);
 
     return textElement;
+  };
+
+  type DescriptionLayout = {
+    lines: string[];
+    anchorX: number;
+    baseline: number;
+    fontSize: number;
+    lineHeight: number;
+    fill: string;
+    fontWeight: string;
+    fontStyle: string;
+    fontFamily: string;
+    letterSpacing?: string;
+  };
+
+  const computeDescriptionLayout = (
+    cardEl: HTMLElement,
+    descriptionEl: HTMLElement,
+    titleEl: HTMLElement | null,
+    x0Ref: number,
+    y0Ref: number,
+  ): DescriptionLayout | null => {
+    const hostStyle = getComputedStyle(cardEl);
+    const descStyle = getComputedStyle(descriptionEl);
+    const hostPadLeft = parsePx(hostStyle.paddingLeft, 16);
+    const hostPadRight = parsePx(hostStyle.paddingRight, 16);
+    const hostPadTop = parsePx(hostStyle.paddingTop, 16);
+    const hostPadBottom = parsePx(hostStyle.paddingBottom, 16);
+    const marginTop = parsePx(descStyle.marginTop, 0);
+    const fontSize = parsePx(descStyle.fontSize, 13);
+    const lineHeight = getLineHeightPx(descStyle, fontSize);
+    const descPadLeft = parsePx(descStyle.paddingLeft, 0);
+    const descPadRight = parsePx(descStyle.paddingRight, 0);
+    const descPadTop = parsePx(descStyle.paddingTop, 0);
+    const raw = (descriptionEl.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!raw) {
+      return null;
+    }
+    const rect = cardEl.getBoundingClientRect();
+    const titleRect = titleEl?.getBoundingClientRect();
+    const columnLeft = titleRect ? titleRect.left : rect.left + hostPadLeft;
+    const columnRight = rect.right - hostPadRight;
+    const maxWidth = Math.max(80, columnRight - columnLeft - descPadLeft - descPadRight);
+    const transformed = applyTextTransform(raw, descStyle.textTransform || 'none');
+    let lines = wrapTextExact(transformed, maxWidth, descStyle);
+    if (!lines || lines.length === 0) {
+      lines = [transformed];
+    }
+    const topBaselineStart = titleRect ? titleRect.bottom - y0Ref : rect.top - y0Ref + hostPadTop;
+    const unclampedBaseline = topBaselineStart + marginTop + descPadTop + (lineHeight - fontSize) / 2 + fontSize;
+    const unclampedAnchorX = columnLeft - x0Ref + descPadLeft;
+    const minX = rect.left - x0Ref + hostPadLeft;
+    const maxX = rect.right - x0Ref - hostPadRight;
+    const minY = rect.top - y0Ref + hostPadTop + fontSize * 0.9;
+    const maxY = rect.bottom - y0Ref - hostPadBottom - fontSize * 0.5;
+    const clampVal = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const anchorX = clampVal(unclampedAnchorX, minX, maxX);
+    const baseline = clampVal(unclampedBaseline, minY, maxY);
+    const weightNumeric = normalizeFontWeight(descStyle.fontWeight || '400');
+    const fontWeight = `${weightNumeric}`;
+    const fontStyle = descStyle.fontStyle || 'normal';
+    const fill = descStyle.color || COLORS.text;
+    const fontFamily = resolveSvgFontFamily(weightNumeric);
+    const letterSpacing = descStyle.letterSpacing && descStyle.letterSpacing !== 'normal' ? descStyle.letterSpacing : undefined;
+    return {
+      lines,
+      anchorX,
+      baseline,
+      fontSize,
+      lineHeight,
+      fill,
+      fontWeight,
+      fontStyle,
+      fontFamily,
+      letterSpacing,
+    };
+  };
+
+  const applyDescriptionLayoutToText = (
+    textEl: SVGTextElement,
+    layout: DescriptionLayout,
+  ) => {
+    textEl.setAttribute('x', `${layout.anchorX}`);
+    textEl.setAttribute('y', `${layout.baseline}`);
+    textEl.setAttribute('fill', layout.fill);
+    textEl.setAttribute('font-size', `${layout.fontSize}`);
+    textEl.setAttribute('font-family', layout.fontFamily);
+    textEl.setAttribute('font-weight', layout.fontWeight);
+    textEl.setAttribute('font-style', layout.fontStyle);
+    textEl.setAttribute('dominant-baseline', 'alphabetic');
+    textEl.setAttribute('text-rendering', 'geometricPrecision');
+    textEl.setAttribute('text-anchor', 'start');
+    if (layout.letterSpacing) {
+      textEl.setAttribute('letter-spacing', layout.letterSpacing);
+    } else {
+      textEl.removeAttribute('letter-spacing');
+    }
+    populateTextNodeWithLines(textEl, layout.lines, layout.anchorX, layout.lineHeight, layout.fontFamily, layout.fontWeight, layout.letterSpacing);
   };
 
   // Lane backgrounds
@@ -620,8 +797,10 @@ export const exportDiagramPDF = async (
   });
 
   // Cards and inner content
+  const debugAnnotations: Array<{ id: string; x: number; y: number; note: string }> = [];
   const cards = Array.from(containerEl.querySelectorAll('article[data-export-card]')) as HTMLElement[];
   cards.forEach((cardEl) => {
+    const cardId = cardEl.getAttribute('data-export-card-id') ?? '';
     const rect = cardEl.getBoundingClientRect();
     const style = getComputedStyle(cardEl);
     const radius = parsePx(style.borderRadius, 10);
@@ -695,73 +874,42 @@ export const exportDiagramPDF = async (
 
     const descriptionEl = cardEl.querySelector('[data-export="card-description"]') as HTMLElement | null;
     if (descriptionEl) {
-      // Prefer the generic path; if layout metrics are unreliable (0,0 or too narrow), use a host-anchored fallback.
-      const dRect = descriptionEl.getBoundingClientRect();
-      const unreliable = !Number.isFinite(dRect.width) || dRect.width < 4 || (dRect.left === 0 && dRect.top === 0);
-      if (!unreliable) {
-        const textEl = createTextFromElement(descriptionEl);
-        if (textEl) domLayer.appendChild(textEl);
-      } else {
-        // Host-anchored placement fallback for stubborn cards (e.g., GDD and Armazenamento)
-        const hostStyle = getComputedStyle(cardEl);
-        const descStyle = getComputedStyle(descriptionEl);
-        const hostPadLeft = parsePx(hostStyle.paddingLeft, 16);
-        const hostPadRight = parsePx(hostStyle.paddingRight, 16);
-        const hostPadTop = parsePx(hostStyle.paddingTop, 16);
-        const marginTop = parsePx(descStyle.marginTop, 0);
-        const fontSize = parsePx(descStyle.fontSize, 13);
-        const lineHeight = getLineHeightPx(descStyle, fontSize);
-        const maxWidth = Math.max(80, rect.width - hostPadLeft - hostPadRight);
-        // Prefer anchoring below the title if present; otherwise from card padding top
-        const titleRect = titleEl?.getBoundingClientRect();
-        const anchorX = rect.left - x0 + hostPadLeft;
-        const topY = (titleRect ? titleRect.bottom - y0 : rect.top - y0 + hostPadTop) + marginTop;
-        const baseline = topY + (lineHeight - fontSize) / 2 + fontSize;
+      const layout = computeDescriptionLayout(cardEl, descriptionEl, titleEl, x0, y0);
+      let textNode = createTextFromElement(descriptionEl);
+      let appended = false;
 
-        const raw = (descriptionEl.textContent || '').replace(/\s+/g, ' ').trim();
-        if (raw) {
-          const transformed = applyTextTransform(raw, descStyle.textTransform || 'none');
-          let lines = wrapTextExact(transformed, maxWidth, descStyle);
-          if (!lines || lines.length === 0) lines = [transformed];
-          const textElement = document.createElementNS(NS, 'text');
-          textElement.setAttribute('x', `${anchorX}`);
-          textElement.setAttribute('y', `${baseline}`);
-          textElement.setAttribute('fill', descStyle.color || COLORS.text);
-          textElement.setAttribute('font-size', `${fontSize}`);
-          // Map concrete Inter font family for PDF reliability
-          const rawFamily = descStyle.fontFamily || FONT_STACK;
-          const primaryCandidate = rawFamily.split(',')[0]?.replace(/['"]/g, '').trim();
-          const safePrimary = primaryCandidate && primaryCandidate.toLowerCase() !== 'undefined' ? primaryCandidate : '';
-          const fw = (descStyle.fontWeight || '400').toString();
-          const fwNum = parseInt(fw, 10);
-          let svgFamily = safePrimary || 'Inter-Regular';
-          const primaryLower = safePrimary.toLowerCase();
-          if (primaryLower.includes('inter')) {
-            if (Number.isFinite(fwNum)) {
-              if (fwNum >= 700) svgFamily = 'Inter-Bold';
-              else if (fwNum >= 600) svgFamily = 'Inter-SemiBold';
-              else svgFamily = 'Inter-Regular';
-            } else if (fw.toLowerCase() === 'bold') {
-              svgFamily = 'Inter-Bold';
-            } else {
-              svgFamily = 'Inter-Regular';
-            }
-          } else if (!safePrimary) {
-            svgFamily = 'Inter-Regular';
+      if (textNode) {
+        const anchorXRaw = parseFloat(textNode.getAttribute('x') ?? 'NaN');
+        const anchorYRaw = parseFloat(textNode.getAttribute('y') ?? 'NaN');
+        const invalid = !Number.isFinite(anchorXRaw) || !Number.isFinite(anchorYRaw) || (Math.abs(anchorXRaw) < 0.5 && Math.abs(anchorYRaw) < 0.5);
+        if (!invalid) {
+          domLayer.appendChild(textNode);
+          appended = true;
+          if (DEBUG_DESCRIPTIONS) {
+            debugAnnotations.push({
+              id: cardId || 'unknown',
+              x: anchorXRaw,
+              y: anchorYRaw,
+              note: `${cardId || '?'} desc anchor`,
+            });
           }
-          textElement.setAttribute('font-family', svgFamily);
-          textElement.setAttribute('font-weight', fw);
-          textElement.setAttribute('font-style', descStyle.fontStyle || 'normal');
-          textElement.setAttribute('dominant-baseline', 'alphabetic');
-          textElement.setAttribute('text-rendering', 'geometricPrecision');
-          lines.forEach((line, index) => {
-            const tspan = document.createElementNS(NS, 'tspan');
-            tspan.setAttribute('x', `${anchorX}`);
-            if (index > 0) tspan.setAttribute('dy', `${lineHeight}`);
-            tspan.textContent = line;
-            textElement.appendChild(tspan);
+        }
+      }
+
+      if (!appended && layout) {
+        if (!textNode) {
+          textNode = document.createElementNS(NS, 'text');
+        }
+        applyDescriptionLayoutToText(textNode, layout);
+        domLayer.appendChild(textNode);
+        appended = true;
+        if (DEBUG_DESCRIPTIONS) {
+          debugAnnotations.push({
+            id: cardId || 'unknown',
+            x: layout.anchorX,
+            y: layout.baseline,
+            note: `${cardId || '?'} desc anchor`,
           });
-          domLayer.appendChild(textElement);
         }
       }
     }
@@ -845,6 +993,31 @@ export const exportDiagramPDF = async (
       }
     }
   });
+
+  if (DEBUG_DESCRIPTIONS && debugAnnotations.length) {
+    debugAnnotations.forEach(({ id, x, y, note }) => {
+      const marker = document.createElementNS(NS, 'circle');
+      marker.setAttribute('cx', `${x}`);
+      marker.setAttribute('cy', `${y}`);
+      marker.setAttribute('r', '3');
+      marker.setAttribute('fill', '#ff1744');
+      marker.setAttribute('stroke', '#ffffff');
+      marker.setAttribute('stroke-width', '1');
+      marker.setAttribute('data-debug', `anchor-${id}`);
+      domLayer.appendChild(marker);
+
+      const label = document.createElementNS(NS, 'text');
+      label.setAttribute('x', `${x + 6}`);
+      label.setAttribute('y', `${y - 6}`);
+      label.setAttribute('fill', '#d32f2f');
+      label.setAttribute('font-size', '10');
+      label.setAttribute('font-family', 'Inter-400');
+      label.setAttribute('font-weight', '400');
+      label.textContent = note;
+      label.setAttribute('data-debug', `label-${id}`);
+      domLayer.appendChild(label);
+    });
+  }
 
   // Legend container and contents
   const legendWrapper = containerEl.querySelector('[data-export="legend"]') as HTMLElement | null;
@@ -1640,6 +1813,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                     ref={ref}
                     className={variableCardClass}
                     data-export-card="variable"
+                    data-export-card-id={id}
                   >
                     <div className="flex items-center gap-4">
                       <div
@@ -1689,6 +1863,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                     ref={ref}
                     className={cardContainerClass}
                     data-export-card="indicator"
+                    data-export-card-id={id}
                   >
                     <div className="flex items-center gap-4">
                       <div
@@ -1737,6 +1912,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                   ref={ref}
                   className={cardContainerClass}
                   data-export-card="decision"
+                  data-export-card-id={id}
                 >
                   <div className="flex w-full flex-col">
                     <div className="flex items-center gap-4 mb-3">
@@ -1788,54 +1964,63 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                 Cores dos conectores (por grupo)
               </h3>
               <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs text-[#37474f]">
-                <li className="flex items-center gap-2">
+                <li className="flex items-center gap-3">
                   <span
-                    className="inline-block h-1.5 w-10 rounded-full"
+                    className="inline-flex h-[6px] w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('et0') }}
                     data-export="legend-swatch"
                   />
                   <span className="inline-flex items-center gap-1.5">
-                    <strong data-export="legend-text">Grupo ET₀</strong>
+                    <strong className="text-[#1a2332]" data-export="legend-text">
+                      Grupo ET₀
+                    </strong>
                     <ArrowRight
                       size={14}
                       strokeWidth={2.5}
                       className="text-[#607d8b]"
+                      style={{ marginTop: '1px' }}
                       aria-hidden="true"
                       data-export="legend-arrow"
                     />
                     <span data-export="legend-text">Decisão de irrigação (D1)</span>
                   </span>
                 </li>
-                <li className="flex items-center gap-2">
+                <li className="flex items-center gap-3">
                   <span
-                    className="inline-block h-1.5 w-10 rounded-full"
+                    className="inline-flex h-[6px] w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('bh') }}
                     data-export="legend-swatch"
                   />
                   <span className="inline-flex items-center gap-1.5">
-                    <strong data-export="legend-text">Grupo BH</strong>
+                    <strong className="text-[#1a2332]" data-export="legend-text">
+                      Grupo BH
+                    </strong>
                     <ArrowRight
                       size={14}
                       strokeWidth={2.5}
                       className="text-[#607d8b]"
+                      style={{ marginTop: '1px' }}
                       aria-hidden="true"
                       data-export="legend-arrow"
                     />
                     <span data-export="legend-text">Planejamento operacional (D3)</span>
                   </span>
                 </li>
-                <li className="flex items-center gap-2">
+                <li className="flex items-center gap-3">
                   <span
-                    className="inline-block h-1.5 w-10 rounded-full"
+                    className="inline-flex h-[6px] w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('gdd') }}
                     data-export="legend-swatch"
                   />
                   <span className="inline-flex items-center gap-1.5">
-                    <strong data-export="legend-text">Grupo GDD</strong>
+                    <strong className="text-[#1a2332]" data-export="legend-text">
+                      Grupo GDD
+                    </strong>
                     <ArrowRight
                       size={14}
                       strokeWidth={2.5}
                       className="text-[#607d8b]"
+                      style={{ marginTop: '1px' }}
                       aria-hidden="true"
                       data-export="legend-arrow"
                     />
@@ -1845,25 +2030,18 @@ export default function Figure02_Encadeamento(): React.ReactElement {
               </ul>
             </div>
             <p id="fig2-caption" className="text-sm text-[#1a2332] leading-6" data-export="legend-paragraph">
-              <strong className="text-[#1565c0]" data-export="legend-text">Legenda:</strong>
-              <span data-export="legend-text"> Fluxo em duas etapas — (1) Variáveis</span>
-              <ArrowRight
-                size={14}
-                strokeWidth={2.5}
-                className="inline mx-1 align-[-1px] text-[#607d8b]"
-                aria-hidden="true"
-                data-export="legend-arrow"
-              />
-              <span data-export="legend-text">Indicadores; (2) Indicadores</span>
-              <ArrowRight
-                size={14}
-                strokeWidth={2.5}
-                className="inline mx-1 align-[-1px] text-[#607d8b]"
-                aria-hidden="true"
-                data-export="legend-arrow"
-              />
+              <strong className="text-[#1565c0]" data-export="legend-text">Legenda:</strong>{' '}
+              <span data-export="legend-text">Fluxo em duas etapas — (1) Variáveis</span>
+              <span className="inline-flex items-center mx-1 text-[#607d8b]" aria-hidden="true" data-export="legend-arrow">
+                <ArrowRight size={14} strokeWidth={2.5} />
+              </span>
+              <span data-export="legend-text">Indicadores</span>
+              <span className="inline-flex items-center mx-1 text-[#607d8b]" aria-hidden="true" data-export="legend-arrow">
+                <ArrowRight size={14} strokeWidth={2.5} />
+              </span>
+              <span data-export="legend-text">(2) Decisões.</span>{' '}
               <span data-export="legend-text">
-                Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
+                As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
               </span>
             </p>
           </footer>
