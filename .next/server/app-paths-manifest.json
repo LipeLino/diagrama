@@ -1,5 +1,4 @@
 {
-  "/api/export-figura02/route": "app/api/export-figura02/route.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
-  "/figura-02/page": "app/figura-02/page.js"
+  "/fig-pipelineconceitual/page": "app/fig-pipelineconceitual/page.js"
 }

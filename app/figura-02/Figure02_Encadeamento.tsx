@@ -136,7 +136,7 @@ const variableCardClass =
 const cardTitleClass = 'text-[15px] font-bold text-[#1a2332] leading-snug antialiased';
 const cardBodyTextClass = 'text-[13px] leading-relaxed text-[#2d3748] antialiased';
 const pillTextClass =
-  'whitespace-nowrap rounded-md bg-gradient-to-r from-[#e3f2fd] to-[#bbdefb] px-3 py-1 text-[13px] font-bold text-[#0d47a1] border border-[#90caf9] antialiased';
+  'whitespace-nowrap rounded-md bg-linear-to-r from-[#e3f2fd] to-[#bbdefb] px-3 py-1 text-[13px] font-bold text-[#0d47a1] border border-[#90caf9] antialiased';
 const iconWrapperClass =
   'flex h-7 w-7 items-center justify-center rounded-lg bg-[#e3f2fd] text-[#1565C0] border border-[#90caf9] shadow-sm';
 
@@ -219,6 +219,7 @@ export const exportDiagramPDF = async (
   svgRef: ExportableSVG,
   containerRef: ExportContainer,
   name: string,
+  options?: { padding?: number },
 ) => {
   const svgElement = svgRef.current;
   const containerEl = containerRef.current;
@@ -296,16 +297,39 @@ export const exportDiagramPDF = async (
   };
 
   const containerRect = containerEl.getBoundingClientRect();
-  // Tight framing: compute bounds across lanes + legend only (exclude title/buttons)
+  const svgRect = svgElement.getBoundingClientRect();
+  // Tight framing: compute bounds across lanes + legend + connector overlay (exclude title/buttons)
   const laneEls = Array.from(containerEl.querySelectorAll('[data-export="lane"]')) as HTMLElement[];
   const legendForBounds = containerEl.querySelector('[data-export="legend"]') as HTMLElement | null;
-  const boundEls: HTMLElement[] = [...laneEls, ...(legendForBounds ? [legendForBounds] : [])];
+
+  const connectorElements = Array.from(
+    svgElement.querySelectorAll<SVGGraphicsElement>('path, circle, ellipse, line, polyline, polygon, text'),
+  );
+  const connectorRects = connectorElements
+    .map((el) => el.getBoundingClientRect())
+    .filter((rect) => Number.isFinite(rect.width) && Number.isFinite(rect.height) && (rect.width > 0 || rect.height > 0));
+
+  const boundRects: DOMRect[] = connectorRects.length > 0 ? [...connectorRects] : [svgRect];
+  boundRects.push(...laneEls.map((el) => el.getBoundingClientRect()));
+  if (legendForBounds) {
+    boundRects.push(legendForBounds.getBoundingClientRect());
+  }
+  // Include overlay labels, callouts, and headers in bounds so they are not cropped
+  const extraForBounds = Array.from(
+    containerEl.querySelectorAll<HTMLElement>('[data-export="stage-header"], [data-export="lane-title"], [data-export="connector-label"], [data-export="callout"]'),
+  );
+  if (extraForBounds.length) {
+    boundRects.push(...extraForBounds.map((el) => el.getBoundingClientRect()));
+  }
+  if (!boundRects.length) {
+    boundRects.push(containerRect);
+  }
+
   let minL = Number.POSITIVE_INFINITY;
   let minT = Number.POSITIVE_INFINITY;
   let maxR = Number.NEGATIVE_INFINITY;
   let maxB = Number.NEGATIVE_INFINITY;
-  boundEls.forEach((el) => {
-    const r = el.getBoundingClientRect();
+  boundRects.forEach((r) => {
     minL = Math.min(minL, r.left);
     minT = Math.min(minT, r.top);
     maxR = Math.max(maxR, r.right);
@@ -328,7 +352,7 @@ export const exportDiagramPDF = async (
   const exportSvg = document.createElementNS(NS, 'svg');
   exportSvg.setAttribute('xmlns', NS);
   // Add a small padding around the entire diagram so background isn't flush to content
-  const PADDING = 8; // px on each side
+  const PADDING = Math.max(0, options?.padding ?? 4); // px on each side
   const paddedWidth = baseWidth + PADDING * 2;
   const paddedHeight = baseHeight + PADDING * 2;
   exportSvg.setAttribute('width', `${paddedWidth}`);
@@ -381,8 +405,11 @@ export const exportDiagramPDF = async (
   exportSvg.setAttribute('viewBox', `0 0 ${paddedWidth} ${paddedHeight}`);
 
   // 1) Rebuild the HTML cards, lanes, and legend as vector shapes inside the SVG
+  // Split into a back layer (lane backgrounds) and a front layer (cards, texts, legend)
+  const domBackLayer = document.createElementNS(NS, 'g');
   const domLayer = document.createElementNS(NS, 'g');
-  // Shift the entire reconstructed DOM layer by the padding
+  // Shift layers by the padding
+  domBackLayer.setAttribute('transform', `translate(${PADDING},${PADDING})`);
   domLayer.setAttribute('transform', `translate(${PADDING},${PADDING})`);
 
   const measurementCanvas = document.createElement('canvas');
@@ -391,28 +418,55 @@ export const exportDiagramPDF = async (
     throw new Error('Canvas measurement context unavailable for PDF export');
   }
 
+  type CornerRadii = number | Partial<Record<'tl' | 'tr' | 'br' | 'bl', number>>;
+
   const roundedRect = (
     x: number,
     y: number,
     w: number,
     h: number,
-    rx: number,
+    radius: CornerRadii,
     fill: string,
     stroke?: string,
     strokeWidth: number = 1,
   ) => {
-    const r = document.createElementNS(NS, 'rect');
-    r.setAttribute('x', x.toFixed(2));
-    r.setAttribute('y', y.toFixed(2));
-    r.setAttribute('width', w.toFixed(2));
-    r.setAttribute('height', h.toFixed(2));
-    r.setAttribute('rx', rx.toFixed(2));
-    r.setAttribute('fill', fill);
+    const limit = Math.max(0, Math.min(w, h) / 2);
+    const raw = typeof radius === 'number'
+      ? { tl: radius, tr: radius, br: radius, bl: radius }
+      : {
+          tl: radius.tl ?? 0,
+          tr: radius.tr ?? 0,
+          br: radius.br ?? 0,
+          bl: radius.bl ?? 0,
+        };
+    const clamp = (value: number) => Math.max(0, Math.min(value, limit));
+    const radii = {
+      tl: clamp(raw.tl),
+      tr: clamp(raw.tr),
+      br: clamp(raw.br),
+      bl: clamp(raw.bl),
+    };
+
+    const path = document.createElementNS(NS, 'path');
+    const d = [
+      `M ${(x + radii.tl).toFixed(2)} ${y.toFixed(2)}`,
+      `H ${(x + w - radii.tr).toFixed(2)}`,
+      `Q ${(x + w).toFixed(2)} ${y.toFixed(2)} ${(x + w).toFixed(2)} ${(y + radii.tr).toFixed(2)}`,
+      `V ${(y + h - radii.br).toFixed(2)}`,
+      `Q ${(x + w).toFixed(2)} ${(y + h).toFixed(2)} ${(x + w - radii.br).toFixed(2)} ${(y + h).toFixed(2)}`,
+      `H ${(x + radii.bl).toFixed(2)}`,
+      `Q ${x.toFixed(2)} ${(y + h).toFixed(2)} ${x.toFixed(2)} ${(y + h - radii.bl).toFixed(2)}`,
+      `V ${(y + radii.tl).toFixed(2)}`,
+      `Q ${x.toFixed(2)} ${y.toFixed(2)} ${(x + radii.tl).toFixed(2)} ${y.toFixed(2)}`,
+      'Z',
+    ];
+    path.setAttribute('d', d.join(' '));
+    path.setAttribute('fill', fill);
     if (stroke) {
-      r.setAttribute('stroke', stroke);
-      r.setAttribute('stroke-width', `${strokeWidth}`);
+      path.setAttribute('stroke', stroke);
+      path.setAttribute('stroke-width', `${strokeWidth}`);
     }
-    return r;
+    return path;
   };
 
   const parsePx = (value: string | null, fallback: number) => {
@@ -470,6 +524,10 @@ export const exportDiagramPDF = async (
   const wrapTextExact = (text: string, maxWidth: number, style: CSSStyleDeclaration) => {
     if (!text) return [''];
     if (maxWidth <= 0) return [text];
+    const whiteSpace = (style.whiteSpace || '').toLowerCase();
+    if (whiteSpace === 'nowrap' || whiteSpace.startsWith('pre')) {
+      return [text];
+    }
     const words = text.split(/\s+/).filter(Boolean);
     if (!words.length) return [''];
     const lines: string[] = [];
@@ -561,8 +619,9 @@ export const exportDiagramPDF = async (
   };
 
   const createTextFromElement = (el: HTMLElement, options: TextOptions = {}): SVGTextElement | null => {
-    const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const datasetExport = el.dataset?.export ?? '';
     const paddingLeft = parsePx(style.paddingLeft, 0);
     const paddingRight = parsePx(style.paddingRight, 0);
     const paddingTop = parsePx(style.paddingTop, 0);
@@ -585,6 +644,17 @@ export const exportDiagramPDF = async (
       maxWidth = Math.max(80, hostRect.width - 32); // generous inner width
     }
     let lines = wrapTextExact(transformed, maxWidth, style);
+    const isDecisionTitle = datasetExport === 'card-title' && host?.getAttribute('data-export-card') === 'decision';
+    const isLegendText = datasetExport === 'legend-text' || datasetExport === 'legend-paragraph';
+    if (isDecisionTitle) {
+      const singleLineHeightThreshold = lineHeight * 1.25;
+      const appearsSingleLine = rect.height <= singleLineHeightThreshold;
+      if (lines.length !== 1 && appearsSingleLine) {
+        lines = [transformed];
+      }
+    } else if (isLegendText) {
+      lines = [transformed];
+    }
     // Safety: if wrapping produced no lines due to a zero/NaN width edge case,
     // render a single unwrapped line so content never disappears in the PDF.
     if (!lines || lines.length === 0) {
@@ -772,14 +842,14 @@ export const exportDiagramPDF = async (
     const shadow1 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
     shadow1.setAttribute('fill-opacity', '0.04');
     shadow1.setAttribute('transform', 'translate(0,1)');
-    domLayer.appendChild(shadow1);
+  domBackLayer.appendChild(shadow1);
     const shadow2 = roundedRect(x, y, rect.width, rect.height, radius, '#000000');
     shadow2.setAttribute('fill-opacity', '0.025');
     shadow2.setAttribute('transform', 'translate(0,2)');
-    domLayer.appendChild(shadow2);
+  domBackLayer.appendChild(shadow2);
 
     const body = roundedRect(x, y, rect.width, rect.height, radius, 'url(#panelGrad)', stroke, strokeWidth);
-    domLayer.appendChild(body);
+    domBackLayer.appendChild(body);
   });
 
   // Lane headers (drawn atop background)
@@ -788,10 +858,41 @@ export const exportDiagramPDF = async (
     const rect = header.getBoundingClientRect();
   const x = rect.left - x0;
   const y = rect.top - y0;
-    const bar = roundedRect(x, y, rect.width, rect.height, 12, COLORS.laneHead);
+    const bar = roundedRect(
+      x,
+      y,
+      rect.width,
+      rect.height,
+      { tl: 12, tr: 12, br: 0, bl: 0 },
+      COLORS.laneHead,
+    );
     domLayer.appendChild(bar);
     const text = createTextFromElement(header, { align: 'center', color: '#ffffff' });
     if (text) {
+      domLayer.appendChild(text);
+    }
+  });
+
+  // Stage column headers (top row)
+  const stageHeaders = Array.from(containerEl.querySelectorAll('[data-export="stage-header"]')) as HTMLElement[];
+  stageHeaders.forEach((header) => {
+    const text = createTextFromElement(header, { align: 'center' });
+    if (text) domLayer.appendChild(text);
+  });
+
+  // Lane vertical titles (rotated)
+  const laneTitles = Array.from(containerEl.querySelectorAll('[data-export="lane-title"]')) as HTMLElement[];
+  laneTitles.forEach((titleEl) => {
+    const rect = titleEl.getBoundingClientRect();
+    const cx = rect.left - x0 + rect.width / 2;
+    const cy = rect.top - y0 + rect.height / 2;
+    const text = createTextFromElement(titleEl, { align: 'center' });
+    if (text) {
+      text.setAttribute('x', `${cx}`);
+      text.setAttribute('y', `${cy}`);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
       domLayer.appendChild(text);
     }
   });
@@ -1053,6 +1154,28 @@ export const exportDiagramPDF = async (
     );
     domLayer.appendChild(legendBody);
 
+    // Legend pill wrappers (rounded rectangles around each element group)
+    const legendPills = Array.from(legendWrapper.querySelectorAll('[data-export="legend-pill"]')) as HTMLElement[];
+    legendPills.forEach((pill) => {
+      const pRect = pill.getBoundingClientRect();
+      const pStyle = getComputedStyle(pill);
+      const pRadius = parsePx(pStyle.borderRadius, 8);
+      const pStroke = pStyle.borderTopColor || pStyle.borderColor || '#d6dde8';
+      const pStrokeWidth = parsePx(pStyle.borderTopWidth || pStyle.borderWidth, 1);
+      const pFill = pStyle.backgroundColor || '#ffffff';
+      const pillRect = roundedRect(
+        pRect.left - x0,
+        pRect.top - y0,
+        pRect.width,
+        pRect.height,
+        pRadius,
+        pFill,
+        pStroke,
+        pStrokeWidth,
+      );
+      domLayer.appendChild(pillRect);
+    });
+
     const legendSwatches = Array.from(legendWrapper.querySelectorAll('[data-export="legend-swatch"]')) as HTMLElement[];
     legendSwatches.forEach((swatch) => {
       const swRect = swatch.getBoundingClientRect();
@@ -1069,12 +1192,138 @@ export const exportDiagramPDF = async (
       domLayer.appendChild(sw);
     });
 
+    // Legend icons (e.g., activity icon) if present
+    const legendIcons = Array.from(legendWrapper.querySelectorAll('[data-export="icon-wrapper"]')) as HTMLElement[];
+    legendIcons.forEach((iconWrapper) => {
+      const iRect = iconWrapper.getBoundingClientRect();
+      const iStyle = getComputedStyle(iconWrapper);
+      const iconRadius = parsePx(iStyle.borderRadius, 8);
+      const iconStroke = iStyle.borderTopColor || '#90caf9';
+      const iconStrokeWidth = parsePx(iStyle.borderTopWidth, 1);
+      const wrapperRect = roundedRect(
+        iRect.left - x0,
+        iRect.top - y0,
+        iRect.width,
+        iRect.height,
+        iconRadius,
+        iStyle.backgroundColor || COLORS.iconBg,
+        iconStroke,
+        iconStrokeWidth,
+      );
+      domLayer.appendChild(wrapperRect);
+
+      const iconSvg = iconWrapper.querySelector('svg[data-export="icon"]');
+      if (iconSvg) {
+        const svgRect = iconSvg.getBoundingClientRect();
+        const svgClone = iconSvg.cloneNode(true) as SVGSVGElement;
+        svgClone.setAttribute('x', `${svgRect.left - x0}`);
+        svgClone.setAttribute('y', `${svgRect.top - y0}`);
+        svgClone.setAttribute('width', `${svgRect.width}`);
+        svgClone.setAttribute('height', `${svgRect.height}`);
+        const svgStyle = getComputedStyle(iconSvg);
+        const strokeColor = svgStyle.stroke && svgStyle.stroke !== 'none'
+          ? svgStyle.stroke
+          : svgStyle.color || COLORS.iconBorder;
+        svgClone.setAttribute('stroke', strokeColor);
+        const strokeWidthValue = svgStyle.strokeWidth && svgStyle.strokeWidth !== 'none'
+          ? svgStyle.strokeWidth
+          : '2';
+        svgClone.setAttribute('stroke-width', strokeWidthValue);
+        svgClone.setAttribute('stroke-linecap', 'round');
+        svgClone.setAttribute('stroke-linejoin', 'round');
+        svgClone.setAttribute('fill', svgStyle.fill && svgStyle.fill !== 'none' ? svgStyle.fill : 'none');
+        domLayer.appendChild(svgClone);
+      }
+    });
+
     const legendArrows = Array.from(legendWrapper.querySelectorAll('svg[data-export="legend-arrow"]')) as SVGSVGElement[];
+    type LegendMetrics = {
+      blockTop: number;
+      lineHeight: number;
+      fontSize: number;
+      baseline: number;
+    };
+
+    const getLegendMetrics = (el: HTMLElement | null): LegendMetrics | null => {
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      const fontSize = parsePx(style.fontSize || null, 14);
+      const lineHeight = getLineHeightPx(style, fontSize);
+      const paddingTop = parsePx(style.paddingTop || null, 0);
+      const blockTop = rect.top - y0 + paddingTop;
+      const baseline = blockTop + (lineHeight - fontSize) / 2 + fontSize;
+      return { blockTop, lineHeight, fontSize, baseline };
+    };
+
+    const findSiblingText = (container: HTMLElement | null): HTMLElement | null => {
+      if (!container) return null;
+      const searchDirection = (node: Element | null, forward: boolean): HTMLElement | null => {
+        let current = node;
+        while (current) {
+          const datasetExport = (current as HTMLElement).dataset?.export;
+          if (datasetExport === 'legend-text') {
+            return current as HTMLElement;
+          }
+          current = forward
+            ? current.nextElementSibling
+            : current.previousElementSibling;
+        }
+        return null;
+      };
+
+      const fromParent = searchDirection(container.previousElementSibling, false)
+        ?? searchDirection(container.nextElementSibling, true);
+      if (fromParent) return fromParent;
+
+      const within = Array.from(container.children).find((child) => {
+        if (!(child instanceof HTMLElement)) return false;
+        return child.dataset?.export === 'legend-text';
+      }) as HTMLElement | undefined;
+      if (within) return within;
+
+      const parent = container.parentElement;
+      if (parent) {
+        const viaParent = searchDirection(parent.previousElementSibling, false)
+          ?? searchDirection(parent.nextElementSibling, true);
+        if (viaParent) return viaParent;
+      }
+      return null;
+    };
+
     legendArrows.forEach((arrow) => {
       const arrowRect = arrow.getBoundingClientRect();
+      const container = arrow.parentElement as HTMLElement | null;
+      const prevText = container?.previousElementSibling as HTMLElement | null;
+      const nextText = container?.nextElementSibling as HTMLElement | null;
+      const textRef = findSiblingText(container);
+      const metrics = getLegendMetrics(textRef);
+      let arrowTop: number;
+      if (metrics) {
+        const innerTop = metrics.blockTop + Math.max(0, (metrics.lineHeight - arrowRect.height) / 2);
+        const alignMiddleOffset = metrics.fontSize * 0.12;
+        arrowTop = innerTop + alignMiddleOffset;
+      } else if (container) {
+        const containerRect = container.getBoundingClientRect();
+        arrowTop = containerRect.top - y0 + (containerRect.height - arrowRect.height) / 2;
+      } else {
+        arrowTop = arrowRect.top - y0;
+      }
+
       const arrowClone = arrow.cloneNode(true) as SVGSVGElement;
-  arrowClone.setAttribute('x', `${arrowRect.left - x0}`);
-  arrowClone.setAttribute('y', `${arrowRect.top - y0}`);
+      let arrowLeft = arrowRect.left - x0;
+      if (prevText && nextText) {
+        const prevRect = prevText.getBoundingClientRect();
+        const nextRect = nextText.getBoundingClientRect();
+        const prevRight = prevRect.right - x0;
+        const nextLeft = nextRect.left - x0;
+        const gapMid = prevRight + (nextLeft - prevRight) / 2;
+        const gapWidth = nextLeft - prevRight;
+        const centerBias = gapWidth * 0.25; // tiny visual nudge keeps arrow optically centered between the text spans
+        arrowLeft = gapMid - arrowRect.width / 2 + centerBias;
+      }
+      arrowClone.setAttribute('x', `${arrowLeft}`);
+      arrowClone.setAttribute('y', `${arrowTop}`);
       arrowClone.setAttribute('width', `${arrowRect.width}`);
       arrowClone.setAttribute('height', `${arrowRect.height}`);
       const arrowStyle = getComputedStyle(arrow);
@@ -1092,14 +1341,214 @@ export const exportDiagramPDF = async (
       domLayer.appendChild(arrowClone);
     });
 
-    const legendTexts = Array.from(legendWrapper.querySelectorAll('[data-export="legend-text"]')) as HTMLElement[];
+    const legendTexts = Array.from(
+      legendWrapper.querySelectorAll('[data-export="legend-text"], [data-export="legend-paragraph"]')
+    ) as HTMLElement[];
     legendTexts.forEach((textEl) => {
       const legendText = createTextFromElement(textEl);
       if (legendText) {
         domLayer.appendChild(legendText);
       }
     });
+
+    // Decision diamond glyphs (rotated squares)
+    const legendDiamonds = Array.from(legendWrapper.querySelectorAll('[data-export="legend-diamond"]')) as HTMLElement[];
+    legendDiamonds.forEach((dEl) => {
+      const rect = dEl.getBoundingClientRect();
+      const cx = rect.left - x0 + rect.width / 2;
+      const cy = rect.top - y0 + rect.height / 2;
+      const style = getComputedStyle(dEl);
+      const stroke = style.borderTopColor || '#1f6feb';
+      const strokeWidth = parsePx(style.borderTopWidth, 1);
+      const side = Math.max(2, Math.min(rect.width, rect.height) / Math.SQRT2);
+      const half = side / 2;
+      const square = document.createElementNS(NS, 'rect');
+      square.setAttribute('x', `${cx - half}`);
+      square.setAttribute('y', `${cy - half}`);
+      square.setAttribute('width', `${side}`);
+      square.setAttribute('height', `${side}`);
+      square.setAttribute('rx', '1.5');
+      square.setAttribute('ry', '1.5');
+      square.setAttribute('fill', '#ffffff');
+      square.setAttribute('stroke', stroke);
+      square.setAttribute('stroke-width', `${strokeWidth}`);
+      square.setAttribute('transform', `rotate(45 ${cx} ${cy})`);
+      domLayer.appendChild(square);
+    });
   }
+
+  // Connector overlay labels (HTML spans above SVG)
+  const overlayLabels = Array.from(containerEl.querySelectorAll('[data-export="connector-label"]')) as HTMLElement[];
+  overlayLabels.forEach((labelEl) => {
+    const rect = labelEl.getBoundingClientRect();
+    const style = getComputedStyle(labelEl);
+    const radius = parsePx(style.borderRadius, Math.min(rect.height / 2, 999));
+    const stroke = style.borderTopColor || '#c5d2e3';
+    const strokeWidth = parsePx(style.borderTopWidth, 1);
+    const fill = style.backgroundColor || '#ffffff';
+    const pill = roundedRect(
+      rect.left - x0,
+      rect.top - y0,
+      rect.width,
+      rect.height,
+      radius,
+      fill,
+      stroke,
+      strokeWidth,
+    );
+    domLayer.appendChild(pill);
+    const text = createTextFromElement(labelEl, { align: 'center' });
+    if (text) domLayer.appendChild(text);
+
+    // Optional pointer from label toward its target
+    const pointerDir = (labelEl.getAttribute('data-pointer') || '').toLowerCase();
+    if (pointerDir === 'down') {
+      const cx = rect.left - x0 + rect.width / 2;
+      const baseY = rect.top - y0 + rect.height; // bottom edge of pill
+      const triBorder = document.createElementNS(NS, 'polygon');
+      triBorder.setAttribute('points', `${cx},${baseY + 6} ${cx - 6},${baseY} ${cx + 6},${baseY}`);
+      triBorder.setAttribute('fill', stroke);
+      domLayer.appendChild(triBorder);
+      const triInner = document.createElementNS(NS, 'polygon');
+      triInner.setAttribute('points', `${cx},${baseY + 5} ${cx - 5},${baseY} ${cx + 5},${baseY}`);
+      triInner.setAttribute('fill', fill);
+      domLayer.appendChild(triInner);
+    } else if (pointerDir === 'right') {
+      const baseX = rect.left - x0 + rect.width; // right edge of pill
+      const cy = rect.top - y0 + rect.height / 2;
+      const triBorder = document.createElementNS(NS, 'polygon');
+      triBorder.setAttribute('points', `${baseX},${cy - 6} ${baseX},${cy + 6} ${baseX + 6},${cy}`);
+      triBorder.setAttribute('fill', stroke);
+      domLayer.appendChild(triBorder);
+      const triInner = document.createElementNS(NS, 'polygon');
+      triInner.setAttribute('points', `${baseX},${cy - 5} ${baseX},${cy + 5} ${baseX + 5},${cy}`);
+      triInner.setAttribute('fill', fill);
+      domLayer.appendChild(triInner);
+    }
+  });
+
+  // Callouts (popup notes with pointer)
+  const callouts = Array.from(containerEl.querySelectorAll('[data-export="callout"]')) as HTMLElement[];
+  callouts.forEach((cEl) => {
+    const rect = cEl.getBoundingClientRect();
+    const style = getComputedStyle(cEl);
+    const radius = parsePx(style.borderRadius, 6);
+    const stroke = style.borderTopColor || '#b8c4d6';
+    const strokeWidth = parsePx(style.borderTopWidth, 1);
+    const fill = style.backgroundColor || '#ffffff';
+  // Use getPropertyValue to avoid `any` access for the short-hand gap property
+  const gapShorthand = style.getPropertyValue('gap');
+  const gapPx = parsePx(style.columnGap || gapShorthand || null, 8);
+    const box = roundedRect(
+      rect.left - x0,
+      rect.top - y0,
+      rect.width,
+      rect.height,
+      radius,
+      fill,
+      stroke,
+      strokeWidth,
+    );
+    domLayer.appendChild(box);
+
+    // Optional icon inside callout (clone if present)
+    const icon = cEl.querySelector('svg');
+    let iconRightOffset = 0;
+    if (icon) {
+      const iRect = icon.getBoundingClientRect();
+      const iClone = icon.cloneNode(true) as SVGSVGElement;
+      iClone.setAttribute('x', `${iRect.left - x0}`);
+      iClone.setAttribute('y', `${iRect.top - y0}`);
+      iClone.setAttribute('width', `${iRect.width}`);
+      iClone.setAttribute('height', `${iRect.height}`);
+      const iStyle = getComputedStyle(icon);
+      if (iStyle.stroke && iStyle.stroke !== 'none') iClone.setAttribute('stroke', iStyle.stroke);
+      if (iStyle.fill && iStyle.fill !== 'none') iClone.setAttribute('fill', iStyle.fill);
+      if (iStyle.strokeWidth && iStyle.strokeWidth !== 'none') iClone.setAttribute('stroke-width', iStyle.strokeWidth);
+      iClone.setAttribute('stroke-linecap', 'round');
+      iClone.setAttribute('stroke-linejoin', 'round');
+      domLayer.appendChild(iClone);
+      iconRightOffset = (iRect.width || 0) + gapPx;
+    }
+
+    const text = createTextFromElement(cEl);
+    if (text) {
+      // If there is an icon, align text start to padding-left + icon width + gap
+      if (iconRightOffset > 0) {
+        const padLeft = parsePx(style.paddingLeft, 6);
+        const newX = (rect.left - x0) + padLeft + iconRightOffset;
+        const prevX = parseFloat(text.getAttribute('x') || '0');
+        const delta = Number.isFinite(prevX) ? (newX - prevX) : 0;
+        text.setAttribute('x', `${newX}`);
+        // Shift tspans by same delta so the first line anchors correctly
+        const tspans = Array.from(text.querySelectorAll('tspan')) as SVGTextElement[];
+        tspans.forEach((tspan, idx) => {
+          const xAttr = tspan.getAttribute('x');
+          if (xAttr) {
+            const old = parseFloat(xAttr);
+            const next = (Number.isFinite(old) ? old : newX) + delta;
+            tspan.setAttribute('x', `${next}`);
+          } else if (idx === 0) {
+            tspan.setAttribute('x', `${newX}`);
+          }
+        });
+      }
+      domLayer.appendChild(text);
+    }
+
+    // We intentionally do not draw callout pointers here. Pointer triangles are drawn on labels (above) and should point toward the target card.
+  });
+
+  // Decision diamond (rotated square) in the diagram
+  const decisionNodes = Array.from(containerEl.querySelectorAll('[data-export-card="decisao"]')) as HTMLElement[];
+  decisionNodes.forEach((nodeEl) => {
+    const nRect = nodeEl.getBoundingClientRect();
+    const cx = nRect.left - x0 + nRect.width / 2;
+    const cy = nRect.top - y0 + nRect.height / 2;
+    // Match on-screen: wrapper h-20 w-20 contains inner rotated square roughly same size.
+    const side = Math.max(4, Math.min(nRect.width, nRect.height) * 0.9);
+    const half = side / 2;
+    const square = document.createElementNS(NS, 'rect');
+    square.setAttribute('x', `${cx - half}`);
+    square.setAttribute('y', `${cy - half}`);
+    square.setAttribute('width', `${side}`);
+    square.setAttribute('height', `${side}`);
+    square.setAttribute('rx', '4');
+    square.setAttribute('ry', '4');
+    square.setAttribute('fill', '#ffffff');
+    square.setAttribute('stroke', '#b8c4d6');
+    square.setAttribute('stroke-width', '1');
+    square.setAttribute('transform', `rotate(45 ${cx} ${cy})`);
+    domLayer.appendChild(square);
+    // Manual multi-line title handling respecting <br/>
+    const titleEl = nodeEl.querySelector('[data-export="card-title"]') as HTMLElement | null;
+    if (titleEl) {
+      const rawHtml = titleEl.innerHTML;
+      const lines = rawHtml.split(/<br\s*\/?>(?:\s*)/i).map(l => l.replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+      if (lines.length) {
+        const fontSize = 15; // matches activityTitleClass
+        const lineHeight = fontSize * 1.2;
+        const textGroup = document.createElementNS(NS, 'g');
+        lines.forEach((line, idx) => {
+          const text = document.createElementNS(NS, 'text');
+          text.setAttribute('x', `${cx}`);
+          // Center block vertically around cy
+          const totalHeight = lineHeight * lines.length;
+            const firstBaseline = cy - (totalHeight / 2) + fontSize; // approximate
+          const y = firstBaseline + idx * lineHeight;
+          text.setAttribute('y', `${y}`);
+          text.setAttribute('fill', COLORS.text);
+          text.setAttribute('font-size', `${fontSize}`);
+          text.setAttribute('font-family', 'Inter-600');
+          text.setAttribute('font-weight', '600');
+          text.setAttribute('text-anchor', 'middle');
+          text.textContent = line;
+          textGroup.appendChild(text);
+        });
+        domLayer.appendChild(textGroup);
+      }
+    }
+  });
 
   // Append the diagram by cloning the existing SVG (keeps paths etc.) UNDER the DOM layer
   // so cards/text render above connectors like on the live page
@@ -1110,9 +1559,10 @@ export const exportDiagramPDF = async (
   diagramClone.setAttribute('y', `${svgRectAbs.top - y0 + PADDING}`);
   // Prepare the diagram clone for vector PDF: strip filters, materialize arrows
   stripUnsupportedAndReplaceMarkers(diagramClone);
-  // Place reconstructed DOM layer first (cards, text, legend), then connectors on TOP (arrows in front)
-  exportSvg.appendChild(domLayer);
+  // Layering: back backgrounds → connectors → front DOM (cards/labels/legend)
+  exportSvg.appendChild(domBackLayer);
   exportSvg.appendChild(diagramClone);
+  exportSvg.appendChild(domLayer);
 
   // Serialize composed SVG and send to server to render via pdfkit (vector)
   const serializer = new XMLSerializer();
@@ -1966,7 +2416,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
               <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs text-[#37474f]">
                 <li className="flex items-center gap-3">
                   <span
-                    className="inline-flex h-[6px] w-12 rounded-[5px]"
+                    className="inline-flex h-1.5 w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('et0') }}
                     data-export="legend-swatch"
                   />
@@ -1987,7 +2437,7 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                 </li>
                 <li className="flex items-center gap-3">
                   <span
-                    className="inline-flex h-[6px] w-12 rounded-[5px]"
+                    className="inline-flex h-1.5 w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('bh') }}
                     data-export="legend-swatch"
                   />
@@ -2003,12 +2453,12 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                       aria-hidden="true"
                       data-export="legend-arrow"
                     />
-                    <span data-export="legend-text">Planejamento operacional (D3)</span>
+                    <span data-export="legend-text">Planejamento operacional (D2)</span>
                   </span>
                 </li>
                 <li className="flex items-center gap-3">
                   <span
-                    className="inline-flex h-[6px] w-12 rounded-[5px]"
+                    className="inline-flex h-1.5 w-12 rounded-[5px]"
                     style={{ backgroundColor: getStrokeByTarget('gdd') }}
                     data-export="legend-swatch"
                   />
@@ -2024,24 +2474,35 @@ export default function Figure02_Encadeamento(): React.ReactElement {
                       aria-hidden="true"
                       data-export="legend-arrow"
                     />
-                    <span data-export="legend-text">Manejo fitossanitário (D2)</span>
+                    <span data-export="legend-text">Manejo fitossanitário (D3)</span>
                   </span>
                 </li>
               </ul>
             </div>
-            <p id="fig2-caption" className="text-sm text-[#1a2332] leading-6" data-export="legend-paragraph">
+            <p
+              id="fig2-caption"
+              className="text-sm text-[#1a2332] leading-6 whitespace-nowrap"
+              data-export="legend-paragraph"
+            >
               <strong className="text-[#1565c0]" data-export="legend-text">Legenda:</strong>{' '}
-              <span data-export="legend-text">Fluxo em duas etapas — (1) Variáveis</span>
-              <span className="inline-flex items-center mx-1 text-[#607d8b]" aria-hidden="true" data-export="legend-arrow">
-                <ArrowRight size={14} strokeWidth={2.5} />
+              <span className="pr-1" data-export="legend-text">fluxo em três etapas — (1) Variáveis</span>
+              <span
+                className="inline-flex items-center mx-1 align-middle text-[#607d8b] leading-none whitespace-nowrap"
+                aria-hidden="true"
+                data-export="legend-arrow"
+              >
+                <ArrowRight size={14} strokeWidth={2.5} data-export="legend-arrow" />
               </span>
-              <span data-export="legend-text">Indicadores</span>
-              <span className="inline-flex items-center mx-1 text-[#607d8b]" aria-hidden="true" data-export="legend-arrow">
-                <ArrowRight size={14} strokeWidth={2.5} />
+              <span className="pl-1" data-export="legend-text">(2) Indicadores</span>
+              <span
+                className="inline-flex items-center mx-1 align-middle text-[#607d8b] leading-none whitespace-nowrap"
+                aria-hidden="true"
+                data-export="legend-arrow"
+              >
+                <ArrowRight size={14} strokeWidth={2.5} data-export="legend-arrow" />
               </span>
-              <span data-export="legend-text">(2) Decisões.</span>{' '}
-              <span data-export="legend-text">
-                As setas usam três cores por grupo: ET₀/D1, BH/D3 e GDD/D2. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
+              <span className="pl-1" data-export="legend-text">
+                (3) Decisões. As setas usam três cores por grupo: ET₀/D1, BH/D2 e GDD/D3. Todas as conexões de um grupo compartilham a mesma cor ao longo de todo o percurso.
               </span>
             </p>
           </footer>

@@ -14,21 +14,10 @@ const figures = [
       "Arquitetura IoT com interoperabilidade SensorThings e conectividade híbrida.",
   },
   {
-    href: "/figura-04",
-    title: "Figura 4 – Pipeline DSS de Irrigação",
-    description: "Fluxo ingestão→recomendação com QA/QC e métricas WDQMS.",
-  },
-  {
-    href: "/figura-05",
-    title: "Figura 5 – Walk-forward, monitoração e drift",
+    href: "/fig-pipelineconceitual",
+    title: "Figura 4 – Pipeline conceitual",
     description:
-      "Janela deslizante, monitoração contínua e alarmes de drift para retreinamento.",
-  },
-  {
-    href: "/figura-06",
-    title: "Figura 6 – Camadas de segurança e papéis (RBAC)",
-    description:
-      "Papéis, gateway, serviços e banco com RLS e conformidade à LGPD.",
+      "Dados, indicadores, recomendação e ação com conectores SVG e exportação vetorial.",
   },
 ];
 
