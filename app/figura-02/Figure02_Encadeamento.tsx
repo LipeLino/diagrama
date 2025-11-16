@@ -45,14 +45,14 @@ const COLORS = {
 // Prefer the same font stack as the site; PDF will map via server fontCallback when available
 const FONT_STACK = 'Inter, Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif';
 
-const FALLBACK_FONT_FAMILY = 'Roboto-400';
+const FALLBACK_FONT_FAMILY = 'NotoSansMath-Regular';
 const INTER_FONT_BY_WEIGHT: Record<number, string> = {
   400: 'Inter-400',
   600: 'Inter-600',
   700: 'Inter-700',
 };
 
-const FALLBACK_GLYPH_REGEX = /[\u2080-\u2089\u0391-\u03A9\u03B1-\u03C9\u2200-\u22FF]/;
+const FALLBACK_GLYPH_REGEX = /[\u2080-\u2089\u0391-\u03A9\u03B1-\u03C9\u1D00-\u1D7F\u2070-\u209F\u2200-\u22FF]/;
 
 const normalizeFontWeight = (fontWeightInput: string | number | undefined): number => {
   if (typeof fontWeightInput === 'number') {
@@ -1162,7 +1162,8 @@ export const exportDiagramPDF = async (
       const pRadius = parsePx(pStyle.borderRadius, 8);
       const pStroke = pStyle.borderTopColor || pStyle.borderColor || '#d6dde8';
       const pStrokeWidth = parsePx(pStyle.borderTopWidth || pStyle.borderWidth, 1);
-      const pFill = pStyle.backgroundColor || '#ffffff';
+      // Force solid white background for PDF export (rgba values with transparency may render incorrectly)
+      const pFill = '#ffffff';
       const pillRect = roundedRect(
         pRect.left - x0,
         pRect.top - y0,
@@ -1571,7 +1572,7 @@ export const exportDiagramPDF = async (
   const res = await fetch('/api/export-figura02', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ svg: source, width: baseWidth, height: baseHeight, filename: name }),
+    body: JSON.stringify({ svg: source, width: paddedWidth, height: paddedHeight, filename: name }),
   });
   if (!res.ok) {
     const info = await res.json().catch(() => ({}));

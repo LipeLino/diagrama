@@ -34,7 +34,9 @@ export async function POST(req: Request): Promise<Response> {
         { name: 'Inter-400', file: 'Inter-Regular.ttf' },
         { name: 'Inter-600', file: 'Inter-SemiBold.ttf' },
         { name: 'Inter-700', file: 'Inter-Bold.ttf' },
-        { name: 'Roboto-400', file: 'Roboto-Regular.ttf' },
+  { name: 'Roboto-400', file: 'Roboto-Regular.ttf' },
+  { name: 'NotoSansSymbols2-Regular', file: 'NotoSansSymbols2-Regular.ttf' },
+  { name: 'NotoSansMath-Regular', file: 'NotoSansMath-Regular.ttf' },
       ];
 
       fontFiles.forEach(({ name, file }) => {
@@ -75,10 +77,12 @@ export async function POST(req: Request): Promise<Response> {
         if (normalized.includes('inter-700')) return 'Inter-700';
         if (normalized.includes('inter-600')) return 'Inter-600';
         if (normalized.includes('inter-400') || normalized === 'inter') return bold ? 'Inter-700' : 'Inter-400';
-        if (normalized.includes('roboto-400') || normalized.includes('roboto')) return 'Roboto-400';
+  if (normalized.includes('roboto-400') || normalized.includes('roboto')) return 'Roboto-400';
+  if (normalized.includes('notosansmath-regular') || normalized.includes('notosansmath')) return 'NotoSansMath-Regular';
+  if (normalized.includes('notosanssymbols2-regular') || normalized.includes('notosanssymbols2')) return 'NotoSansSymbols2-Regular';
         if (normalized.includes('helvetica')) return 'Helvetica';
         // Default to Inter regular if available, otherwise Helvetica
-        return 'Inter-400';
+    return 'Inter-400';
       },
     };
     SVGtoPDFFn(doc, svg, 0, 0, options);

@@ -19,6 +19,7 @@ export type ConnectorOptions = {
   fromSide?: 'right' | 'left' | 'top' | 'bottom';
   fromXFraction?: number; // when fromSide is top/bottom, 0..1 across the edge (default 0.66)
   arcLift?: number; // raises the curve by subtracting from control point y's (adds more curvature)
+  straightExit?: number; // optional straight segment (px) leaving the source before starting the curve
 };
 
 export function useRerouteOnResize(refs: Array<React.RefObject<Element | null>>, onResize: () => void): void {
@@ -73,6 +74,7 @@ export function useMergePoint(
   targetRef: React.RefObject<HTMLElement | null>,
   xGap: number = 28,
   side: 'left' | 'right' = 'left',
+  yOffset: number = 0,
 ): { x: number; y: number } {
   const [pt, setPt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const sourceRefsRef = useRef(sourceRefs);
@@ -89,14 +91,14 @@ export function useMergePoint(
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
 
-    const y = targetRect.top + targetRect.height / 2 - containerRect.top;
+    const y = targetRect.top + targetRect.height / 2 - containerRect.top + yOffset;
     const effectiveGap = Math.max(xGap, MERGE_MIN_GAP);
     const x = side === 'left'
       ? Math.max(0, targetRect.left - containerRect.left - effectiveGap)
       : targetRect.right - containerRect.left + effectiveGap;
 
     setPt({ x, y });
-  }, [containerRef, targetRef, xGap, side]);
+  }, [containerRef, targetRef, xGap, side, yOffset]);
 
   // Compute synchronously before paint to avoid a frame with (0,0)
   useLayoutEffect(() => {
@@ -112,7 +114,7 @@ export function useCurvedConnector(
   containerRef: React.RefObject<HTMLDivElement | null>,
   fromRef: React.RefObject<HTMLElement | null>,
   toRef: React.RefObject<HTMLElement | null>,
-  { offset = 0, fromOffset, toOffset, minDx, fromAnchorY, toAnchorY, fromInset = 0, toInset = 0, fromSide = 'right', fromXFraction = 0.66, arcLift = 0 }: ConnectorOptions = {},
+  { offset = 0, fromOffset, toOffset, minDx, fromAnchorY, toAnchorY, fromInset = 0, toInset = 0, fromSide = 'right', fromXFraction = 0.66, arcLift = 0, straightExit = 0 }: ConnectorOptions = {},
 ): string {
   const [path, setPath] = useState('');
 
@@ -153,6 +155,25 @@ export function useCurvedConnector(
         y1 = fromRect.top + fromRect.height / 2 - containerRect.top + startOffset;
     }
 
+    const exitLength = Math.max(0, straightExit);
+    const exitDir = (() => {
+      switch (fromSide) {
+        case 'left':
+          return { dx: -1, dy: 0 };
+        case 'right':
+          return { dx: 1, dy: 0 };
+        case 'top':
+          return { dx: 0, dy: -1 };
+        case 'bottom':
+        default:
+          return { dx: 0, dy: 1 };
+      }
+    })();
+
+    const curveStartX = exitLength > 0 ? x1 + exitDir.dx * exitLength : x1;
+    const curveStartY = exitLength > 0 ? y1 + exitDir.dy * exitLength : y1;
+    const preSegment = exitLength > 0 ? ` L ${curveStartX.toFixed(2)} ${curveStartY.toFixed(2)}` : '';
+
     const arrowDir: 1 | -1 = x1 <= toRect.left - containerRect.left ? 1 : -1;
     const targetEdge = arrowDir === 1
       ? toRect.left - containerRect.left
@@ -174,22 +195,22 @@ export function useCurvedConnector(
     const straightStartX = x2 - arrowDir * stubLength;
     const straightStartY = y2;
 
-    const rawRun = straightStartX - x1;
+    const rawRun = straightStartX - curveStartX;
     const runDir = rawRun === 0 ? arrowDir : (rawRun > 0 ? 1 : -1);
     const absRun = Math.max(Math.abs(rawRun), minDx ?? 72);
 
-  // Apply arcLift to raise the curve (control points only)
-  const cx1 = x1 + absRun * 0.6 * runDir;
-  const cy1 = y1 - arcLift;
-  const cx2 = straightStartX - absRun * 0.35 * runDir;
-  const cy2 = straightStartY - arcLift * 0.6; // slightly less lift near target for smoother descent
+    // Apply arcLift to raise the curve (control points only)
+    const cx1 = curveStartX + absRun * 0.6 * runDir;
+    const cy1 = curveStartY - arcLift;
+    const cx2 = straightStartX - absRun * 0.35 * runDir;
+    const cy2 = straightStartY - arcLift * 0.6; // slightly less lift near target for smoother descent
 
-    const d = `M ${x1.toFixed(2)} ${y1.toFixed(2)} C ${cx1.toFixed(2)} ${cy1.toFixed(2)}, ${cx2.toFixed(2)} ${cy2.toFixed(
+    const d = `M ${x1.toFixed(2)} ${y1.toFixed(2)}${preSegment} C ${cx1.toFixed(2)} ${cy1.toFixed(2)}, ${cx2.toFixed(2)} ${cy2.toFixed(
       2,
     )}, ${straightStartX.toFixed(2)} ${straightStartY.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)}`;
 
     setPath(d);
-  }, [containerRef, fromRef, toRef, offset, fromOffset, toOffset, minDx]);
+  }, [containerRef, fromRef, toRef, offset, fromOffset, toOffset, minDx, fromAnchorY, toAnchorY, fromInset, toInset, fromSide, fromXFraction, arcLift, straightExit]);
 
   // Layout effect prevents a transient path to (0,0) before measurements settle
   useLayoutEffect(() => {
@@ -271,6 +292,7 @@ export function useMergeConnector(
   isFromMerge: boolean = false,
   targetSide: 'left' | 'right' = 'left',
   fromSide: 'left' | 'right' = 'right',
+  toOffset: number = 0,
 ): string {
   const [path, setPath] = useState('');
 
@@ -296,7 +318,7 @@ export function useMergeConnector(
     if (isFromMerge) {
       const x1 = mergeX;
       const y1 = mergeY;
-      const y2 = toRect.top + toRect.height / 2 - containerRect.top;
+      const y2 = toRect.top + toRect.height / 2 - containerRect.top + toOffset;
       const arrowDir = targetSide === 'right' ? -1 : 1;
       const targetEdgeX = targetSide === 'right'
         ? toRect.right - containerRect.left
@@ -338,7 +360,7 @@ export function useMergeConnector(
       )}, ${x2.toFixed(2)} ${y2.toFixed(2)}`;
       setPath(d);
     }
-  }, [containerRef, fromRef, toRef, mergeX, mergeY, fromOffset, isFromMerge, targetSide]);
+  }, [containerRef, fromRef, toRef, mergeX, mergeY, fromOffset, isFromMerge, targetSide, fromSide, toOffset]);
 
   // Layout effect to ensure we draw with measured coordinates before paint
   useLayoutEffect(() => {

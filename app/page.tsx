@@ -14,6 +14,12 @@ const figures = [
       "Arquitetura IoT com interoperabilidade SensorThings e conectividade híbrida.",
   },
   {
+    href: "/figura-04",
+    title: "Figura 4 – Balanço de energia na superfície",
+    description:
+      "Partição de Rₙ em H, LE e G (conceitual), com exportação vetorial SVG/PDF.",
+  },
+  {
     href: "/fig-pipelineconceitual",
     title: "Figura 4 – Pipeline conceitual",
     description:
