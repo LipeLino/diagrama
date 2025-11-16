@@ -228,7 +228,7 @@ export default function Figure13_EstadoPainel() {
           </p>
         </div>
 
-        <div className="rounded-3xl border border-[#d6e3f2] bg-[#0f2747]/[0.02] p-5">
+        <div className="rounded-3xl border border-[#d6e3f2] bg-[#0f2747]/2 p-5">
           <div className="mb-4 flex flex-wrap items-center gap-4 text-sm font-semibold text-[#0f2747]">
             <span className="rounded-full border border-[#cfd8e8] px-3 py-1">SLA latência &lt; 350 ms</span>
             <span className="rounded-full border border-[#cfd8e8] px-3 py-1">SLA disponibilidade &gt;= 99%</span>

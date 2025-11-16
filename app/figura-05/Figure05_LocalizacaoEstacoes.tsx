@@ -605,14 +605,13 @@ export default function Figure05_LocalizacaoEstacoes() {
 
       <style jsx global>{`
         .leaflet-tooltip.station-tooltip {
-          position: relative;
-          background: rgba(255, 255, 255, 0.86);
+          background: rgba(255, 255, 255, 0.97);
           border: 1.5px solid rgba(15, 39, 71, 0.2);
-          border-radius: 14px;
+          border-radius: 12px;
           box-shadow: 0 8px 24px rgba(15, 39, 71, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.8);
           padding: 12px 14px;
-          backdrop-filter: blur(14px) saturate(140%);
-          -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           min-width: 200px;
           line-height: 1.35;
           letter-spacing: 0.01em;
@@ -626,9 +625,26 @@ export default function Figure05_LocalizacaoEstacoes() {
           transition: transform 0.25s ease;
         }
         .leaflet-tooltip.station-tooltip.station-tooltip--frutal {
+          background: transparent;
+          border-color: transparent;
+          box-shadow: none;
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+          padding: 0;
           padding-bottom: 72px;
+          min-width: 0;
         }
         .leaflet-tooltip.station-tooltip.station-tooltip--frutal .station-tooltip__content {
+          background: rgba(255, 255, 255, 0.97);
+          border: 1.5px solid rgba(15, 39, 71, 0.2);
+          border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(15, 39, 71, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.8);
+          padding: 12px 14px;
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          min-width: 200px;
+          line-height: 1.35;
+          letter-spacing: 0.01em;
           transform: translateY(-60px);
         }
         .leaflet-tooltip-top.station-tooltip:before {

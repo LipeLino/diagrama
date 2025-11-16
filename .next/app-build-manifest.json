@@ -1,3 +1,25 @@
 {
-  "pages": {}
+  "pages": {
+    "/figura-05/page": [
+      "static/chunks/4d4ac_next_dist_b82a4d1c._.js",
+      "static/chunks/diagrama_app_favicon_ico_mjs_87d8bd21._.js",
+      "static/chunks/[root-of-the-server]__1ad46dcd._.css",
+      "static/chunks/diagrama_app_layout_tsx_794cf9e2._.js",
+      "static/chunks/4d4ac_next_dist_client_components_builtin_global-error_106b9d6a.js",
+      "static/chunks/4d4ac_react-leaflet_lib_index_51e22436.js",
+      "static/chunks/diagrama_387a7035._.js",
+      "static/chunks/4d4ac_e6a86495._.js",
+      "static/chunks/4d4ac_leaflet_dist_leaflet_16185908.css",
+      "static/chunks/diagrama_app_figura-05_page_tsx_c5b765f0._.js",
+      "static/chunks/[turbopack]_browser_dev_hmr-client_hmr-client_ts_339c59ce._.js",
+      "static/chunks/4d4ac_next_dist_compiled_react-dom_96010747._.js",
+      "static/chunks/4d4ac_next_dist_compiled_next-devtools_index_34d29ea3.js",
+      "static/chunks/4d4ac_next_dist_compiled_7fda45f6._.js",
+      "static/chunks/4d4ac_next_dist_client_ede80ea5._.js",
+      "static/chunks/4d4ac_next_dist_e5f9e7a7._.js",
+      "static/chunks/4d4ac_@swc_helpers_cjs_a7f6322f._.js",
+      "static/chunks/diagrama_a0ff3932._.js",
+      "static/chunks/turbopack-diagrama_3ce6bbba._.js"
+    ]
+  }
 }
