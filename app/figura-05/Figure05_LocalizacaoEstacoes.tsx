@@ -43,8 +43,8 @@ type TooltipDirection = "top" | "bottom" | "left" | "right";
 
 const DEFAULT_TOOLTIP_OFFSET: [number, number] = [0, -10];
 const STATION_TOOLTIP_OVERRIDES: Record<string, { direction: TooltipDirection; offset?: [number, number] }> = {
-  frutal: { direction: "left", offset: [-18, -12] },
-  frutalSigma: { direction: "right", offset: [18, 10] },
+  frutal: { direction: "right", offset: [18, 10] },
+  frutalSigma: { direction: "left", offset: [-18, -26] },
   aparecida: { direction: "bottom", offset: [0, 14] },
   planura: { direction: "bottom", offset: [0, 16] },
 };
@@ -676,6 +676,9 @@ export default function Figure05_LocalizacaoEstacoes() {
         .station-overlay--frutal.station-overlay-left {
           transform: translate(calc(-100% - 18px), -50%) translateY(-40px);
         }
+        .station-overlay--frutal.station-overlay-right {
+          transform: translate(18px, -50%) translateY(-40px);
+        }
         .station-overlay__card {
           background: rgba(255, 255, 255, 0.92);
           border: 1.5px solid rgba(15, 39, 71, 0.2);
@@ -693,32 +696,37 @@ export default function Figure05_LocalizacaoEstacoes() {
           position: absolute;
           width: 0;
           height: 0;
-          border: 10px solid transparent;
+          border-color: transparent;
+          border-style: solid;
           filter: drop-shadow(0 3px 6px rgba(15, 39, 71, 0.2));
         }
         .station-overlay-top .station-overlay__arrow {
           top: 100%;
           left: 50%;
-          transform: translate(-50%, -2px);
+          transform: translate(-50%, 0);
+          border-width: 12px 10px 0 10px;
           border-top-color: rgba(255, 255, 255, 0.92);
         }
         .station-overlay-bottom .station-overlay__arrow {
           bottom: 100%;
           left: 50%;
-          transform: translate(-50%, 2px) rotate(180deg);
-          border-top-color: rgba(255, 255, 255, 0.92);
+          transform: translate(-50%, 0);
+          border-width: 0 10px 12px 10px;
+          border-bottom-color: rgba(255, 255, 255, 0.92);
         }
         .station-overlay-left .station-overlay__arrow {
           left: 100%;
           top: 50%;
-          transform: translate(-2px, -50%) rotate(90deg);
-          border-top-color: rgba(255, 255, 255, 0.92);
+          transform: translate(0, -50%);
+          border-width: 10px 0 10px 12px;
+          border-left-color: rgba(255, 255, 255, 0.92);
         }
         .station-overlay-right .station-overlay__arrow {
           right: 100%;
           top: 50%;
-          transform: translate(2px, -50%) rotate(-90deg);
-          border-top-color: rgba(255, 255, 255, 0.92);
+          transform: translate(0, -50%);
+          border-width: 10px 12px 10px 0;
+          border-right-color: rgba(255, 255, 255, 0.92);
         }
       `}</style>
     </section>
