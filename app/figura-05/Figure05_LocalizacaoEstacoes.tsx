@@ -256,10 +256,13 @@ const StationOverlays = ({ map, stations }: { map: LeafletMap | null; stations: 
       {overlayStations.map((station) => {
         const direction = station.direction;
         const tooltipClassName = `station-overlay station-overlay-${direction}${station.id === "frutal" ? " station-overlay--frutal" : ""}`;
+        const cardClassName = `station-overlay__card fig5-glass-panel flex flex-col gap-2 text-left${
+          station.id === "frutalSigma" ? " station-overlay__card--sigma" : ""
+        }${station.id === "frutal" ? " station-overlay__card--frutal" : ""}`;
 
         return (
           <div key={station.id} className={tooltipClassName} style={{ left: station.x, top: station.y }}>
-            <div className="station-overlay__card fig5-glass-panel flex flex-col gap-2 text-left">
+            <div className={cardClassName}>
               <div className="flex items-start gap-2">
                 <span
                   className="mt-1 h-3.5 w-3.5 rounded-full border border-white/70 shadow-sm"
@@ -677,7 +680,7 @@ export default function Figure05_LocalizacaoEstacoes() {
           transform: translate(calc(-100% - 18px), -50%) translateY(-40px);
         }
         .station-overlay--frutal.station-overlay-right {
-          transform: translate(18px, -50%) translateY(-40px);
+          transform: translate(18px, -50%);
         }
         .station-overlay__card {
           background: rgba(255, 255, 255, 0.92);
@@ -691,6 +694,12 @@ export default function Figure05_LocalizacaoEstacoes() {
           color: #0f2747;
           backdrop-filter: blur(14px);
           -webkit-backdrop-filter: blur(14px);
+        }
+        .station-overlay__card--sigma {
+          transform: translateY(-20px);
+        }
+        .station-overlay__card--frutal {
+          transform: translateY(-10px);
         }
         .station-overlay__arrow {
           position: absolute;
