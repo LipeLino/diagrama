@@ -122,7 +122,7 @@ const basemapUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_I
 
 const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] }) => {
   const [LeafletComponents, setLeafletComponents] = useState<typeof import("react-leaflet") | null>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
+  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
 
   useEffect(() => {
     import("react-leaflet").then((mod) => setLeafletComponents(mod));
@@ -159,7 +159,9 @@ const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] 
     <div className="relative h-full w-full">
       <MapContainer
         ref={(instance) => {
-          if (instance) mapRef.current = instance;
+          if (instance) {
+            setMapInstance(instance);
+          }
         }}
         center={mapCenter}
         zoom={INITIAL_ZOOM}
@@ -206,7 +208,7 @@ const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] 
         ))}
       </MapContainer>
 
-      <StationOverlays mapRef={mapRef} stations={stationsList} />
+      <StationOverlays map={mapInstance} stations={stationsList} />
     </div>
   );
 };
@@ -217,11 +219,10 @@ type StationOverlay = StationMetadata & {
   direction: TooltipDirection;
 };
 
-const StationOverlays = ({ mapRef, stations }: { mapRef: React.RefObject<LeafletMap | null>; stations: StationMetadata[] }) => {
+const StationOverlays = ({ map, stations }: { map: LeafletMap | null; stations: StationMetadata[] }) => {
   const [overlayStations, setOverlayStations] = useState<StationOverlay[]>([]);
 
   useEffect(() => {
-    const map = mapRef.current;
     if (!map) return;
 
     const updatePositions = () => {
@@ -248,7 +249,7 @@ const StationOverlays = ({ mapRef, stations }: { mapRef: React.RefObject<Leaflet
       map.off("resize", updatePositions);
       map.off("load", updatePositions);
     };
-  }, [mapRef, stations]);
+  }, [map, stations]);
 
   return (
     <div className="pointer-events-none absolute inset-0">
