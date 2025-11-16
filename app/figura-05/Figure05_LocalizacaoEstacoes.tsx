@@ -3,7 +3,7 @@
 import "leaflet/dist/leaflet.css";
 
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import type { LatLngBoundsExpression, LatLngTuple } from "leaflet";
+import type { LatLngBoundsExpression, LatLngTuple, Map as LeafletMap } from "leaflet";
 
 import { TRIANGULO_STATES, TRIANGULO_HULL, TRIANGULO_BOUNDS, type LatLon } from "../../data/geo/trianguloMapData";
 import { exportAsSVG, exportDiagramPDF } from "../figura-02/Figure02_Encadeamento";
@@ -122,6 +122,7 @@ const basemapUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_I
 
 const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] }) => {
   const [LeafletComponents, setLeafletComponents] = useState<typeof import("react-leaflet") | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
     import("react-leaflet").then((mod) => setLeafletComponents(mod));
@@ -152,94 +153,144 @@ const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] 
     );
   }
 
-  const { MapContainer, TileLayer, ZoomControl, ScaleControl, Polygon, CircleMarker, Tooltip } = LeafletComponents;
+  const { MapContainer, TileLayer, ZoomControl, ScaleControl, Polygon, CircleMarker } = LeafletComponents;
 
   return (
-    <MapContainer
-      center={mapCenter}
-      zoom={INITIAL_ZOOM}
-      minZoom={MIN_ZOOM}
-      maxZoom={MAX_ZOOM}
-      maxBounds={LEAFLET_BOUNDS}
-      zoomControl={false}
-      attributionControl={false}
-      scrollWheelZoom={false}
-      className="h-full w-full rounded-[28px]"
-      style={{ height: "100%", width: "100%" }}
-    >
-      <TileLayer url={basemapUrl} attribution={basemapAttribution} detectRetina />
-      <ZoomControl position="topright" />
-      <ScaleControl position="bottomleft" />
+    <div className="relative h-full w-full">
+      <MapContainer
+        ref={(instance) => {
+          if (instance) mapRef.current = instance;
+        }}
+        center={mapCenter}
+        zoom={INITIAL_ZOOM}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        maxBounds={LEAFLET_BOUNDS}
+        zoomControl={false}
+        attributionControl={false}
+        scrollWheelZoom={false}
+        className="h-full w-full rounded-[28px]"
+        style={{ height: "100%", width: "100%" }}
+      >
+        <TileLayer url={basemapUrl} attribution={basemapAttribution} detectRetina />
+        <ZoomControl position="topright" />
+        <ScaleControl position="bottomleft" />
 
-      {statesPolygons.map((state) =>
-        state.polygons.map((polygon, index) => (
-          <Polygon
-            key={`${state.id}-${index}`}
-            positions={polygon}
-            pathOptions={{
-              color: state.id === "MG" ? COLORS.trianguloStroke : COLORS.border,
-              weight: state.id === "MG" ? 1.6 : 0.8,
-              fillOpacity: state.id === "MG" ? 0.08 : 0,
-              dashArray: state.id === "MG" ? undefined : "6 10",
-            }}
-          />
-        )),
-      )}
+        {statesPolygons.map((state) =>
+          state.polygons.map((polygon, index) => (
+            <Polygon
+              key={`${state.id}-${index}`}
+              positions={polygon}
+              pathOptions={{
+                color: state.id === "MG" ? COLORS.trianguloStroke : COLORS.border,
+                weight: state.id === "MG" ? 1.6 : 0.8,
+                fillOpacity: state.id === "MG" ? 0.08 : 0,
+                dashArray: state.id === "MG" ? undefined : "6 10",
+              }}
+            />
+          )),
+        )}
 
-      <Polygon
-        positions={trianguloPolygonLatLngs}
-        pathOptions={{ color: COLORS.trianguloStroke, weight: 2.8, fillColor: "#c7e2ff", fillOpacity: 0.35 }}
-      />
+        <Polygon
+          positions={trianguloPolygonLatLngs}
+          pathOptions={{ color: COLORS.trianguloStroke, weight: 2.8, fillColor: "#c7e2ff", fillOpacity: 0.35 }}
+        />
 
-      {stationsList.map((station) => {
-        const direction = getStationTooltipDirection(station.id);
-        const offset = getStationTooltipOffset(station.id);
-        const tooltipClassName = `station-tooltip${station.id === "frutal" ? " station-tooltip--frutal" : ""}`;
-
-        return (
+        {stationsList.map((station) => (
           <CircleMarker
             key={station.id}
             center={[station.latitude, station.longitude]}
             radius={8}
             pathOptions={{ color: "#ffffff", fillColor: providerColor(station.provider), fillOpacity: 0.95, weight: 2.5 }}
-          >
-            <Tooltip direction={direction} offset={offset} permanent className={tooltipClassName}>
-              <div className="station-tooltip__content flex flex-col gap-2 text-left">
-                <div className="flex items-start gap-2">
-                  <span
-                    className="mt-1 h-3.5 w-3.5 rounded-full border border-white/70 shadow-sm"
-                    style={{ backgroundColor: providerColor(station.provider) }}
-                  />
-                  <div>
-                    <p className="text-[13px] font-black leading-tight text-[#0f2747]">{station.estacao}</p>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#475569]">{station.municipio}</p>
-                  </div>
-                </div>
-                <div
-                  className="rounded-xl border border-[#e2e8f0] bg-white/90 px-3 py-2 text-[10px] font-semibold text-[#0f2747] shadow-inner"
-                  style={{ fontVariantNumeric: "tabular-nums" }}
-                >
-                  <div className="flex items-center justify-between gap-4 text-[#475569]">
-                    <span>Coord.</span>
-                    <span className="font-mono text-[#0f2747]">
-                      {formatCoordinate(station.latitude, "lat")} · {formatCoordinate(station.longitude, "lon")}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-4 text-[#475569]">
-                    <span>Alt.</span>
-                    <span className="font-mono text-[#0f2747]">{station.altitudeM} m</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-4 text-[#475569]">
-                    <span>Prov.</span>
-                    <span className="text-[#0f2747]">{station.provider}</span>
-                  </div>
+          />
+        ))}
+      </MapContainer>
+
+      <StationOverlays mapRef={mapRef} stations={stationsList} />
+    </div>
+  );
+};
+
+type StationOverlay = StationMetadata & {
+  x: number;
+  y: number;
+  direction: TooltipDirection;
+};
+
+const StationOverlays = ({ mapRef, stations }: { mapRef: React.RefObject<LeafletMap | null>; stations: StationMetadata[] }) => {
+  const [overlayStations, setOverlayStations] = useState<StationOverlay[]>([]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const updatePositions = () => {
+      const next = stations.map((station) => {
+        const point = map.latLngToContainerPoint([station.latitude, station.longitude]);
+        return {
+          ...station,
+          direction: getStationTooltipDirection(station.id),
+          x: point.x,
+          y: point.y,
+        };
+      });
+      setOverlayStations(next);
+    };
+
+    updatePositions();
+    map.on("move", updatePositions);
+    map.on("zoom", updatePositions);
+    map.on("resize", updatePositions);
+    map.on("load", updatePositions);
+    return () => {
+      map.off("move", updatePositions);
+      map.off("zoom", updatePositions);
+      map.off("resize", updatePositions);
+      map.off("load", updatePositions);
+    };
+  }, [mapRef, stations]);
+
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      {overlayStations.map((station) => {
+        const direction = station.direction;
+        const tooltipClassName = `station-overlay station-overlay-${direction}${station.id === "frutal" ? " station-overlay--frutal" : ""}`;
+
+        return (
+          <div key={station.id} className={tooltipClassName} style={{ left: station.x, top: station.y }}>
+            <div className="station-overlay__card fig5-glass-panel flex flex-col gap-2 text-left">
+              <div className="flex items-start gap-2">
+                <span
+                  className="mt-1 h-3.5 w-3.5 rounded-full border border-white/70 shadow-sm"
+                  style={{ backgroundColor: providerColor(station.provider) }}
+                />
+                <div>
+                  <p className="text-[13px] font-black leading-tight text-[#0f2747]">{station.estacao}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#475569]">{station.municipio}</p>
                 </div>
               </div>
-            </Tooltip>
-          </CircleMarker>
+              <div className="rounded-xl border border-[#e2e8f0] bg-white/90 px-3 py-2 text-[10px] font-semibold text-[#0f2747] shadow-inner" style={{ fontVariantNumeric: "tabular-nums" }}>
+                <div className="flex items-center justify-between gap-4 text-[#475569]">
+                  <span>Coord.</span>
+                  <span className="font-mono text-[#0f2747]">
+                    {formatCoordinate(station.latitude, "lat")} · {formatCoordinate(station.longitude, "lon")}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-4 text-[#475569]">
+                  <span>Alt.</span>
+                  <span className="font-mono text-[#0f2747]">{station.altitudeM} m</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-4 text-[#475569]">
+                  <span>Prov.</span>
+                  <span className="text-[#0f2747]">{station.provider}</span>
+                </div>
+              </div>
+            </div>
+            <span className="station-overlay__arrow" />
+          </div>
         );
       })}
-    </MapContainer>
+    </div>
   );
 };
 
@@ -604,60 +655,69 @@ export default function Figure05_LocalizacaoEstacoes() {
       </svg>
 
       <style jsx global>{`
-        .leaflet-tooltip.station-tooltip {
-          background: rgba(255, 255, 255, 0.97);
+        .station-overlay {
+          position: absolute;
+          pointer-events: none;
+          z-index: 1200;
+        }
+        .station-overlay-top {
+          transform: translate(-50%, calc(-100% - 18px));
+        }
+        .station-overlay-bottom {
+          transform: translate(-50%, 18px);
+        }
+        .station-overlay-left {
+          transform: translate(calc(-100% - 18px), -50%);
+        }
+        .station-overlay-right {
+          transform: translate(18px, -50%);
+        }
+        .station-overlay--frutal.station-overlay-left {
+          transform: translate(calc(-100% - 18px), -50%) translateY(-40px);
+        }
+        .station-overlay__card {
+          background: rgba(255, 255, 255, 0.92);
           border: 1.5px solid rgba(15, 39, 71, 0.2);
-          border-radius: 12px;
+          border-radius: 16px;
           box-shadow: 0 8px 24px rgba(15, 39, 71, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.8);
           padding: 12px 14px;
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          min-width: 200px;
+          min-width: 220px;
           line-height: 1.35;
           letter-spacing: 0.01em;
           color: #0f2747;
-          z-index: 1200;
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
         }
-        .leaflet-tooltip.station-tooltip:before {
-          border-color: transparent;
+        .station-overlay__arrow {
+          position: absolute;
+          width: 0;
+          height: 0;
+          border: 10px solid transparent;
+          filter: drop-shadow(0 3px 6px rgba(15, 39, 71, 0.2));
         }
-        .leaflet-tooltip.station-tooltip .station-tooltip__content {
-          transition: transform 0.25s ease;
+        .station-overlay-top .station-overlay__arrow {
+          top: 100%;
+          left: 50%;
+          transform: translate(-50%, -2px);
+          border-top-color: rgba(255, 255, 255, 0.92);
         }
-        .leaflet-tooltip.station-tooltip.station-tooltip--frutal {
-          background: transparent;
-          border-color: transparent;
-          box-shadow: none;
-          backdrop-filter: none;
-          -webkit-backdrop-filter: none;
-          padding: 0;
-          padding-bottom: 72px;
-          min-width: 0;
+        .station-overlay-bottom .station-overlay__arrow {
+          bottom: 100%;
+          left: 50%;
+          transform: translate(-50%, 2px) rotate(180deg);
+          border-top-color: rgba(255, 255, 255, 0.92);
         }
-        .leaflet-tooltip.station-tooltip.station-tooltip--frutal .station-tooltip__content {
-          background: rgba(255, 255, 255, 0.97);
-          border: 1.5px solid rgba(15, 39, 71, 0.2);
-          border-radius: 12px;
-          box-shadow: 0 8px 24px rgba(15, 39, 71, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.8);
-          padding: 12px 14px;
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          min-width: 200px;
-          line-height: 1.35;
-          letter-spacing: 0.01em;
-          transform: translateY(0px);
+        .station-overlay-left .station-overlay__arrow {
+          left: 100%;
+          top: 50%;
+          transform: translate(-2px, -50%) rotate(90deg);
+          border-top-color: rgba(255, 255, 255, 0.92);
         }
-        .leaflet-tooltip-top.station-tooltip:before {
-          border-top-color: rgba(255, 255, 255, 0.97);
-        }
-        .leaflet-tooltip-bottom.station-tooltip:before {
-          border-bottom-color: rgba(255, 255, 255, 0.97);
-        }
-        .leaflet-tooltip-left.station-tooltip:before {
-          border-left-color: rgba(255, 255, 255, 0.97);
-        }
-        .leaflet-tooltip-right.station-tooltip:before {
-          border-right-color: rgba(255, 255, 255, 0.97);
+        .station-overlay-right .station-overlay__arrow {
+          right: 100%;
+          top: 50%;
+          transform: translate(2px, -50%) rotate(-90deg);
+          border-top-color: rgba(255, 255, 255, 0.92);
         }
       `}</style>
     </section>
