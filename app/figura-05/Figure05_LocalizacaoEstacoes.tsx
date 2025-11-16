@@ -645,7 +645,7 @@ export default function Figure05_LocalizacaoEstacoes() {
           min-width: 200px;
           line-height: 1.35;
           letter-spacing: 0.01em;
-          transform: translateY(-60px);
+          transform: translateY(0px);
         }
         .leaflet-tooltip-top.station-tooltip:before {
           border-top-color: rgba(255, 255, 255, 0.97);

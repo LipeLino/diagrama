@@ -1,4 +1,5 @@
 {
+  "/api/export-figura02/route": "app/api/export-figura02/route.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
   "/figura-05/page": "app/figura-05/page.js"
 }
