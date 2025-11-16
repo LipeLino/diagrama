@@ -45,7 +45,7 @@ const COLORS = {
 // Prefer the same font stack as the site; PDF will map via server fontCallback when available
 const FONT_STACK = 'Inter, Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif';
 
-const FALLBACK_FONT_FAMILY = 'NotoSansMath-Regular';
+const FALLBACK_FONT_FAMILY = 'NotoSans-Regular';
 const INTER_FONT_BY_WEIGHT: Record<number, string> = {
   400: 'Inter-400',
   600: 'Inter-600',

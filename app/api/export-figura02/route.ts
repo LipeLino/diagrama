@@ -37,6 +37,7 @@ export async function POST(req: Request): Promise<Response> {
   { name: 'Roboto-400', file: 'Roboto-Regular.ttf' },
   { name: 'NotoSansSymbols2-Regular', file: 'NotoSansSymbols2-Regular.ttf' },
   { name: 'NotoSansMath-Regular', file: 'NotoSansMath-Regular.ttf' },
+  { name: 'NotoSans-Regular', file: 'NotoSans-Regular.ttf' },
       ];
 
       fontFiles.forEach(({ name, file }) => {
@@ -78,6 +79,7 @@ export async function POST(req: Request): Promise<Response> {
         if (normalized.includes('inter-600')) return 'Inter-600';
         if (normalized.includes('inter-400') || normalized === 'inter') return bold ? 'Inter-700' : 'Inter-400';
   if (normalized.includes('roboto-400') || normalized.includes('roboto')) return 'Roboto-400';
+  if (normalized.includes('notosans-regular') || normalized.includes('notosans')) return 'NotoSans-Regular';
   if (normalized.includes('notosansmath-regular') || normalized.includes('notosansmath')) return 'NotoSansMath-Regular';
   if (normalized.includes('notosanssymbols2-regular') || normalized.includes('notosanssymbols2')) return 'NotoSansSymbols2-Regular';
         if (normalized.includes('helvetica')) return 'Helvetica';
