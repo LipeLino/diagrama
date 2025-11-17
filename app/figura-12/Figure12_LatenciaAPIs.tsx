@@ -108,7 +108,7 @@ export default function Figure12_LatenciaAPIs() {
       data-figure="12"
     >
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div data-export="stage-header">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#1565c0]">Monitoramento Agosto–Outubro/2025</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">Latência por rota serverless (ms)</h1>
           <p className="text-sm text-[#0f2747]/80">

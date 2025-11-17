@@ -121,7 +121,7 @@ export default function Figure11_SazonalidadeET0() {
       data-figure="11"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div data-export="stage-header">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#1565c0]">ET₀ diária (mm/dia)</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">Sazonalidade 2025-08 → 2025-10</h1>
           <p className="text-sm text-[#0f2747]/75">
@@ -153,12 +153,22 @@ export default function Figure11_SazonalidadeET0() {
         data-export="lane"
         role="img"
       >
+        <defs>
+          <linearGradient id="fig11Bg" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#f9fbff" />
+            <stop offset="100%" stopColor="#f1f5fb" />
+          </linearGradient>
+          <filter id="fig11Shadow">
+            <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.12" />
+          </filter>
+        </defs>
+
         <rect
           x={dims.padding.left}
           y={dims.padding.top}
           width={dims.width - dims.padding.left - dims.padding.right}
           height={dims.height - dims.padding.top - dims.padding.bottom}
-          fill="#f7faff"
+          fill="url(#fig11Bg)"
           rx={24}
         />
 
@@ -176,15 +186,12 @@ export default function Figure11_SazonalidadeET0() {
                 y={yScale(band.q3)}
                 width={Math.max(0, x2 - x1)}
                 height={yScale(band.q1) - yScale(band.q3)}
-                fill="#cddff7"
-                opacity={0.35}
-                rx={8}
+                fill="#d1e3f7"
+                opacity={0.5}
+                rx={10}
               />
-              <line x1={x1} x2={x2} y1={yScale(band.mean)} y2={yScale(band.mean)} stroke="#1565c0" strokeDasharray="6 4" />
-              <text x={(x1 + x2) / 2} y={yScale(band.mean) - 8} fontSize={12} textAnchor="middle" fill="#0f2747">
-                {band.mean.toFixed(1)} mm/dia
-              </text>
-              <text x={(x1 + x2) / 2} y={dims.height - dims.padding.bottom + 28} textAnchor="middle" fontSize={12} fill="#0f2747">
+              <line x1={x1} x2={x2} y1={yScale(band.mean)} y2={yScale(band.mean)} stroke="#1565c0" strokeWidth={2} strokeDasharray="8 4" />
+              <text x={(x1 + x2) / 2} y={dims.height - dims.padding.bottom + 28} textAnchor="middle" fontSize={13} fontWeight="600" fill="#0f2747">
                 {new Date(monthStart).toLocaleDateString("pt-BR", { month: "short" })}
               </text>
             </g>
@@ -196,33 +203,84 @@ export default function Figure11_SazonalidadeET0() {
             key={series.id}
             d={linePath(series)}
             stroke={series.color}
-            strokeWidth={3}
+            strokeWidth={3.2}
             fill="none"
             strokeLinecap="round"
+            strokeLinejoin="round"
+            filter="url(#fig11Shadow)"
           />
         ))}
 
         {stationSeries.flatMap((series) =>
           series.points.map((point) => (
-            <circle key={`${series.id}-${point.date}`} cx={xScale(point.date)} cy={yScale(point.value)} r={3} fill={series.color} />
+            <circle 
+              key={`${series.id}-${point.date}`} 
+              cx={xScale(point.date)} 
+              cy={yScale(point.value)} 
+              r={4.5} 
+              fill="white" 
+              stroke={series.color}
+              strokeWidth={3}
+              filter="url(#fig11Shadow)"
+            />
           )),
         )}
+
+        {monthlyBands.map((band) => {
+          const monthStart = `${band.month}-01`;
+          const monthEnd = new Date(new Date(monthStart).getFullYear(), new Date(monthStart).getMonth() + 1, 0)
+            .toISOString()
+            .slice(0, 10);
+          const x1 = xScale(monthStart);
+          const x2 = xScale(monthEnd);
+          return (
+            <g key={`${band.month}-label`}>
+              <rect
+                x={(x1 + x2) / 2 - 38}
+                y={yScale(band.mean) - 20}
+                width={76}
+                height={24}
+                fill="white"
+                rx={6}
+                stroke="#1565c0"
+                strokeWidth={1.5}
+                filter="url(#fig11Shadow)"
+              />
+              <text 
+                x={(x1 + x2) / 2} 
+                y={yScale(band.mean) - 4} 
+                fontSize={13} 
+                fontWeight="700"
+                textAnchor="middle" 
+                fill="#1565c0"
+              >
+                {band.mean.toFixed(1)} mm/dia
+              </text>
+            </g>
+          );
+        })}
 
         <g transform={`translate(${dims.padding.left}, ${dims.padding.top - 20})`}>
           {stationSeries.map((series, idx) => (
             <g key={series.id} transform={`translate(${idx * 200}, 0)`}>
-              <rect width={16} height={4} y={-4} fill={series.color} rx={2} />
-              <text x={24} y={0} fontSize={12} fill="#0f2747">
+              <line x1={0} x2={20} y1={0} y2={0} stroke={series.color} strokeWidth={3.2} strokeLinecap="round" />
+              <circle cx={10} cy={0} r={4.5} fill="white" stroke={series.color} strokeWidth={3} />
+              <text x={28} y={4} fontSize={12} fontWeight="500" fill="#0f2747">
                 {series.name}
               </text>
             </g>
           ))}
-          <g transform="translate(640, 0)">
-            <rect width={14} height={14} fill="#cddff7" opacity={0.6} />
-            <text x={20} y={12} fontSize={12} fill="#0f2747">
-              Faixa interquartil mensal (q1–q3)
-            </text>
-          </g>
+        </g>
+
+        <g transform={`translate(${dims.padding.left}, ${dims.height - dims.padding.bottom + 50})`}>
+          <rect x={0} y={-8} width={20} height={20} fill="#d1e3f7" opacity={0.5} rx={4} />
+          <text x={28} y={6} fontSize={12} fontWeight="500" fill="#0f2747">
+            Faixa interquartil mensal (Q1–Q3)
+          </text>
+          <line x1={140} x2={170} y1={2} y2={2} stroke="#1565c0" strokeWidth={2} strokeDasharray="8 4" />
+          <text x={178} y={6} fontSize={12} fontWeight="500" fill="#0f2747">
+            Média mensal
+          </text>
         </g>
       </svg>
     </section>

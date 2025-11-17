@@ -61,7 +61,7 @@ export default function Figure06_ArquiteturaLogica() {
       data-figure="6"
     >
       <div className="flex items-start justify-between">
-        <div>
+        <div data-export="stage-header">
           <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#1565c0]">Redeagromet</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">
             Arquitetura lógica: aquisição → ingestão → persistência → painel

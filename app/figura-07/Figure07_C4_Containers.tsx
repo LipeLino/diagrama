@@ -44,7 +44,7 @@ export default function Figure07_C4_Containers() {
       data-figure="7"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div data-export="stage-header">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#1565c0]">Redeagromet \ C4 – Contêineres</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">
             Fontes externas → Ingestão/ETL → Supabase → APIs → Next.js
@@ -100,7 +100,7 @@ export default function Figure07_C4_Containers() {
               </div>
             </article>
             <article className={`${cardClass} col-span-1`} ref={calcCardRef}>
-              <p className={cardTitleClass}>{`&lt;lib/et/calc.ts&gt;`}</p>
+              <p className={cardTitleClass}>{"<lib/et/calc.ts>"}</p>
               <p className={`${bodyTextClass} mt-2`}>
                 Implementa Penman–Monteith, Equation 10/11 (fallback) e gera `daily_evapotranspiration`/`weather_calculations`.
               </p>

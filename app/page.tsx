@@ -1,6 +1,13 @@
 import Link from "next/link";
 
-const figures = [
+type FigureCard = {
+  href: string;
+  title: string;
+  description: string;
+  isNew?: boolean;
+};
+
+const figures: FigureCard[] = [
   {
     href: "/figura-02",
     title: "Figura 2 – Variáveis → Indicadores → Decisão",
@@ -80,6 +87,13 @@ const figures = [
       "Estágios do cálculo de graus-dia acumulados mais derivações para fenologia e alertas.",
   },
   {
+    href: "/figura-15",
+    title: "Figura 15 – Estratégia walk-forward",
+    description:
+      "Fluxo da validação walk-forward, modelo implantado, monitoramento contínuo e gatilhos de retreinamento/rollback.",
+    isNew: true,
+  },
+  {
     href: "/fig-pipelineconceitual",
     title: "Figura 4 – Pipeline conceitual",
     description:
@@ -108,9 +122,16 @@ export default function Home() {
             key={figure.href}
             className="rounded-2xl border border-[#dde8f3] bg-white/80 p-6 shadow-md transition hover:-translate-y-1 hover:shadow-lg focus-within:-translate-y-1 focus-within:shadow-lg"
           >
-            <h2 className="text-lg font-semibold text-[#0e223d]">
-              {figure.title}
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-[#0e223d]">
+                {figure.title}
+              </h2>
+              {figure.isNew ? (
+                <span className="rounded-full bg-[#e0f2fe] px-3 py-0.5 text-xs font-semibold uppercase tracking-wide text-[#0369a1]">
+                  Novo
+                </span>
+              ) : null}
+            </div>
             <p className="mt-2 text-sm leading-6 text-[#0f2747]/80">
               {figure.description}
             </p>

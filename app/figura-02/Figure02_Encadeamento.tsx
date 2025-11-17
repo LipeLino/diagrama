@@ -75,6 +75,79 @@ const normalizeFontWeight = (fontWeightInput: string | number | undefined): numb
   return 400;
 };
 
+const UNSUPPORTED_COLOR_TOKENS = ["color-mix(", "oklab(", "oklch(", "color("];
+
+const stripUnsupportedColorFunctions = (input?: string | null): string | undefined => {
+  if (!input) return input ?? undefined;
+  if (!/okl|color-mix|color\(/i.test(input)) return input;
+  let output = "";
+  let index = 0;
+  const fallback = "#9ca3af";
+
+  while (index < input.length) {
+    const slice = input.slice(index);
+    const token = UNSUPPORTED_COLOR_TOKENS.find((candidate) => slice.toLowerCase().startsWith(candidate));
+    if (!token) {
+      output += input[index];
+      index += 1;
+      continue;
+    }
+
+    // Skip token and consume until matching closing parenthesis.
+    index += token.length;
+    let depth = 1;
+    while (index < input.length && depth > 0) {
+      const char = input[index];
+      index += 1;
+      if (char === "(") depth += 1;
+      else if (char === ")") depth -= 1;
+    }
+    output += fallback;
+  }
+
+  return output;
+};
+
+type SanitizedStylesheet = { href: string; text: string };
+
+const STYLESHEET_CACHE_TTL_MS = 60 * 1000;
+const sanitizedStylesheetCache = new Map<string, { text: string; expiresAt: number }>();
+
+const fetchAndSanitizeStylesheet = async (href: string): Promise<SanitizedStylesheet | null> => {
+  if (!href) return null;
+  const cached = sanitizedStylesheetCache.get(href);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return { href, text: cached.text };
+  }
+  try {
+    const res = await fetch(href, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const text = stripUnsupportedColorFunctions(raw) ?? raw;
+    sanitizedStylesheetCache.set(href, { text, expiresAt: now + STYLESHEET_CACHE_TTL_MS });
+    return { href, text };
+  } catch {
+    return null;
+  }
+};
+
+const collectSanitizedLinkedStylesheets = async (): Promise<SanitizedStylesheet[]> => {
+  if (typeof document === 'undefined') return [];
+  const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'));
+  const results = await Promise.all(
+    links.map((link) => {
+      const href = link.href;
+      // Skip data URLs to avoid bloating the clone
+      if (!href || href.startsWith('data:')) {
+        return Promise.resolve<SanitizedStylesheet | null>(null);
+      }
+      return fetchAndSanitizeStylesheet(href);
+    }),
+  );
+  return results.filter((entry): entry is SanitizedStylesheet => Boolean(entry));
+};
+
 const resolveSvgFontFamily = (fontWeight: number): string => INTER_FONT_BY_WEIGHT[fontWeight] ?? INTER_FONT_BY_WEIGHT[400];
 
 type TextRun = { text: string; fallback: boolean };
@@ -227,7 +300,10 @@ export const exportElementAsPngPDF = async (
   options?: { scale?: number },
 ) => {
   const element = elementRef.current;
-  if (!element) return;
+  if (!element || typeof document === 'undefined') return;
+
+  const sanitizedLinkedStylesheets = await collectSanitizedLinkedStylesheets();
+  const stylesheetMap = new Map(sanitizedLinkedStylesheets.map((sheet) => [sheet.href, sheet.text]));
 
   const scale = options?.scale ?? Math.min(3, window.devicePixelRatio || 1);
   const canvas = await html2canvas(element, {
@@ -235,16 +311,40 @@ export const exportElementAsPngPDF = async (
     useCORS: true,
     logging: false,
     backgroundColor: null,
-    // html2canvas cannot parse modern color() / color-mix() in oklab;
-    // strip those Tailwind base rules from the cloned document before rasterizing.
+    // html2canvas cannot parse modern color() / color-mix() / oklab() functions;
+    // rewrite those Tailwind base rules from the cloned document before rasterizing.
     onclone: (clonedDoc) => {
-      clonedDoc
-        .querySelectorAll<HTMLStyleElement>('style')
-        .forEach((styleEl) => {
-          if (styleEl.textContent && styleEl.textContent.includes('oklab')) {
-            styleEl.parentElement?.removeChild(styleEl);
+      if (stylesheetMap.size) {
+        const clonedLinks = Array.from(
+          clonedDoc.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'),
+        );
+        clonedLinks.forEach((linkEl) => {
+          const sanitized = stylesheetMap.get(linkEl.href);
+          if (!sanitized) return;
+          const styleReplacement = clonedDoc.createElement('style');
+          if (linkEl.media) {
+            styleReplacement.setAttribute('media', linkEl.media);
           }
+          styleReplacement.textContent = sanitized;
+          linkEl.replaceWith(styleReplacement);
         });
+      }
+
+      clonedDoc.querySelectorAll<HTMLStyleElement>("style").forEach((styleEl) => {
+        const sanitized = stripUnsupportedColorFunctions(styleEl.textContent);
+        if (sanitized !== undefined) {
+          styleEl.textContent = sanitized;
+        }
+      });
+      
+      // Also inline style attributes that might contain oklab
+      clonedDoc.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
+        const style = el.getAttribute("style");
+        const sanitized = stripUnsupportedColorFunctions(style);
+        if (sanitized !== undefined) {
+          el.setAttribute("style", sanitized);
+        }
+      });
     },
   });
 
@@ -358,11 +458,12 @@ export const exportDiagramPDF = async (
     .map((el) => el.getBoundingClientRect())
     .filter((rect) => Number.isFinite(rect.width) && Number.isFinite(rect.height) && (rect.width > 0 || rect.height > 0));
 
-  const boundRects: DOMRect[] = connectorRects.length > 0 ? [...connectorRects] : [svgRect];
-  boundRects.push(...laneEls.map((el) => el.getBoundingClientRect()));
-  if (legendForBounds) {
-    boundRects.push(legendForBounds.getBoundingClientRect());
-  }
+    const boundRects: DOMRect[] = connectorRects.length > 0 ? [...connectorRects] : [svgRect];
+    boundRects.push(svgRect);
+    boundRects.push(...laneEls.map((el) => el.getBoundingClientRect()));
+    if (legendForBounds) {
+      boundRects.push(legendForBounds.getBoundingClientRect());
+    }
   // Include overlay labels, callouts, and headers in bounds so they are not cropped
   const extraForBounds = Array.from(
     containerEl.querySelectorAll<HTMLElement>('[data-export="stage-header"], [data-export="lane-title"], [data-export="connector-label"], [data-export="callout"]'),
@@ -393,8 +494,8 @@ export const exportDiagramPDF = async (
   }
   const x0 = minL;
   const y0 = minT;
-  const baseWidth = Math.max(1, Math.round(maxR - minL));
-  const baseHeight = Math.max(1, Math.round(maxB - minT));
+    const baseWidth = Math.max(1, Math.ceil(maxR - minL));
+    const baseHeight = Math.max(1, Math.ceil(maxB - minT));
 
   // Create export SVG (diagram only; legend reconstructed separately via DOM layer)
   const NS = 'http://www.w3.org/2000/svg';

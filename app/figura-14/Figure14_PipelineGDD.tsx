@@ -87,7 +87,7 @@ export default function Figure14_PipelineGDD() {
       data-figure="14"
     >
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div data-export="stage-header">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#1565c0]">GDD (Growing Degree Days)</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">Pipeline de cálculo e exposição de graus-dia acumulados</h1>
           <p className="text-sm text-[#0f2747]/75">Integra sensores, normalização térmica, cálculo parcial, acúmulo sazonal e entrega em APIs / painel.</p>

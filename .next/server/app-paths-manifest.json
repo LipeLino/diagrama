@@ -1,4 +1,5 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
   "/api/export-figura02/route": "app/api/export-figura02/route.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
   "/fig-pipelineconceitual/page": "app/fig-pipelineconceitual/page.js",
@@ -12,5 +13,6 @@
   "/figura-12/page": "app/figura-12/page.js",
   "/figura-13/page": "app/figura-13/page.js",
   "/figura-14/page": "app/figura-14/page.js",
+  "/figura-15/page": "app/figura-15/page.js",
   "/page": "app/page.js"
 }

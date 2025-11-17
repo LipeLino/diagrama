@@ -436,7 +436,7 @@ export default function Figure05_LocalizacaoEstacoes() {
         </button>
       </div>
 
-      <div className="mt-12 rounded-[36px] border border-[#c8d7ea] bg-linear-to-b from-[#dfe8ff] via-[#f5f8ff] to-white p-4 shadow-inner">
+      <div className="mt-12 rounded-[36px] border border-[#c8d7ea] bg-gradient-to-b from-[#dfe8ff] via-[#f5f8ff] to-white p-4 shadow-inner">
         <div className="relative h-[1020px] w-full overflow-hidden rounded-4xl border border-[#b8c8de] bg-[#0b1a2b]">
           <LeafletStationsMap stationsList={stations} exportRef={mapExportRef} />
 
@@ -472,7 +472,7 @@ export default function Figure05_LocalizacaoEstacoes() {
             <div className="space-y-2 border-t border-[#d1d9e0] pt-4">
               <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#64748b]">Escala</p>
               <div className="flex items-center gap-2">
-                <div className="h-1 flex-1 rounded-full bg-linear-to-r from-[#0f2747] to-[#475569]" />
+                <div className="h-1 flex-1 rounded-full bg-gradient-to-r from-[#0f2747] to-[#475569]" />
                 <span className="text-xs font-bold text-[#0f2747]">{scaleBar.km} km</span>
               </div>
             </div>

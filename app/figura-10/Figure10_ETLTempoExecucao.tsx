@@ -93,7 +93,7 @@ export default function Figure10_ETLTempoExecucao() {
       data-figure="10"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div data-export="stage-header">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#1565c0]">Agosto → Outubro / 2025</p>
           <h1 className="text-2xl font-semibold text-[#0f2747]">Distribuição temporal do tempo de execução (s)</h1>
           <p className="text-sm text-[#0f2747]/70">
