@@ -111,7 +111,7 @@ export default function Figure14_PipelineGDD() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-5" data-export="pipeline">
+        <div className="space-y-5" data-export="lane">
           <article ref={sensoresRef} className={stageCardClass}>
             <p className={stageSubtitleClass}>Etapa 1</p>
             <p className={stageTitleClass}>{gddStages[0].title}</p>
@@ -148,7 +148,7 @@ export default function Figure14_PipelineGDD() {
           </article>
         </div>
 
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-5" data-export="lane">
           <article ref={fenologiaRef} className={`${stageCardClass} bg-[#f6fbff]`}>
             <p className={stageSubtitleClass}>Aplicação fenológica</p>
             <p className={stageTitleClass}>Modelos de estádios (V1 → R6)</p>
@@ -194,11 +194,11 @@ export default function Figure14_PipelineGDD() {
           </marker>
         </defs>
         {[pathSensoresToNormalizar, pathNormalizarToCalcular, pathCalcularToAcumular, pathAcumularToExpor]
-          .filter(Boolean)
+          .filter((path): path is string => typeof path === "string")
           .map((d, index) => (
             <path
               key={`main-${index}`}
-              d={d as string}
+              d={d}
               stroke="#1565c0"
               strokeWidth={2.4}
               fill="none"

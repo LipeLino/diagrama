@@ -191,7 +191,7 @@ export default function Figure13_EstadoPainel() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_1.15fr]">
-        <div className="space-y-4 rounded-3xl border border-[#d6e3f2] bg-white/95 p-5">
+        <div className="space-y-4 rounded-3xl border border-[#d6e3f2] bg-white/95 p-5" data-export="lane">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#1565c0]">Resumo em cartões</p>
           <div className="grid gap-4 sm:grid-cols-2">
             {panelCards.map((card) => {
@@ -228,13 +228,19 @@ export default function Figure13_EstadoPainel() {
           </p>
         </div>
 
-        <div className="rounded-3xl border border-[#d6e3f2] bg-[#0f2747]/2 p-5">
+        <div className="rounded-3xl border border-[#d6e3f2] bg-[#0f2747]/2 p-5" data-export="lane">
           <div className="mb-4 flex flex-wrap items-center gap-4 text-sm font-semibold text-[#0f2747]">
             <span className="rounded-full border border-[#cfd8e8] px-3 py-1">SLA latência &lt; 350 ms</span>
             <span className="rounded-full border border-[#cfd8e8] px-3 py-1">SLA disponibilidade &gt;= 99%</span>
             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[#1565c0]">Escalas independentes</span>
           </div>
-          <svg ref={svgRef} viewBox={`0 0 ${chartDims.width} ${chartDims.height}`} className="w-full" role="img">
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${chartDims.width} ${chartDims.height}`}
+            className="w-full"
+            data-export="lane"
+            role="img"
+          >
             <defs>
               <linearGradient id="fig13Area" x1="0" x2="0" y1="0" y2="1">
                 <stop offset="0%" stopColor="#f7fafc" />

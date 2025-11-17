@@ -25,7 +25,7 @@ const data: EtlRunPoint[] = [
 
 type SeriesKey = "p50" | "p95" | "p99";
 
-const SERIES = [
+const SERIES: Array<{ id: SeriesKey; label: string; color: string }> = [
   { id: "p50", label: "p50 (mediana)", color: "#1565c0" },
   { id: "p95", label: "p95", color: "#f59e0b" },
   { id: "p99", label: "p99", color: "#dc2626" },
@@ -122,6 +122,7 @@ export default function Figure10_ETLTempoExecucao() {
         ref={svgRef}
         viewBox={`0 0 ${SvgDims.width} ${SvgDims.height}`}
         className="mt-8 w-full"
+        data-export="lane"
         role="img"
       >
         <defs>
@@ -170,7 +171,7 @@ export default function Figure10_ETLTempoExecucao() {
         {SERIES.map((series) => (
           <path
             key={series.id}
-            d={linePath(series.id as SeriesKey)}
+            d={linePath(series.id)}
             stroke={series.color}
             strokeWidth={3}
             fill="none"

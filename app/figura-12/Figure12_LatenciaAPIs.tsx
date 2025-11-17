@@ -133,7 +133,13 @@ export default function Figure12_LatenciaAPIs() {
         </div>
       </header>
 
-      <svg ref={svgRef} viewBox={`0 0 ${dims.width} ${dims.height}`} className="w-full" role="img">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${dims.width} ${dims.height}`}
+        className="w-full"
+        data-export="lane"
+        role="img"
+      >
         <defs>
           <linearGradient id="fig12Bg" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#f9fbff" />

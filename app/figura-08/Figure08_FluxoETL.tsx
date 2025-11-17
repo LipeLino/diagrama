@@ -124,7 +124,7 @@ export default function Figure08_FluxoETL() {
           </article>
         </div>
 
-        <article className={`${stepCardClass} lg:mt-20`} ref={cacheRef}>
+        <article className={`${stepCardClass} lg:mt-20`} ref={cacheRef} data-export="lane">
           <p className={stepSubtitleClass}>Cache 5 minutos</p>
           <p className={stepTitleClass}>Leituras correntes</p>
           <p className={`${stepBodyClass} mt-2`}>
@@ -156,11 +156,11 @@ export default function Figure08_FluxoETL() {
           pathNormalizeToLoad,
           pathLoadToAggregate,
         ]
-          .filter(Boolean)
+          .filter((path): path is string => typeof path === "string")
           .map((d, index) => (
             <path
               key={`primary-${index}`}
-              d={d as string}
+              d={d}
               stroke="#1565c0"
               strokeWidth={2.4}
               fill="none"

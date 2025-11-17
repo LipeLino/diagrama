@@ -86,7 +86,7 @@ export default function Figure06_ArquiteturaLogica() {
       </div>
 
       <div className="space-y-5" data-export="lane-stack">
-        <div ref={sensorsRef} className={laneClass}>
+        <div ref={sensorsRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>Sensores</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>Estações automáticas WMO-No. 8</p>
@@ -102,7 +102,7 @@ export default function Figure06_ArquiteturaLogica() {
           </article>
         </div>
 
-        <div ref={providersRef} className={laneClass}>
+        <div ref={providersRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>Fornecedores</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>Conectores FTP / APIs</p>
@@ -117,7 +117,7 @@ export default function Figure06_ArquiteturaLogica() {
           </article>
         </div>
 
-        <div ref={ingestionRef} className={laneClass}>
+        <div ref={ingestionRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>Ingestão / ETL</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>
@@ -137,7 +137,7 @@ export default function Figure06_ArquiteturaLogica() {
           </article>
         </div>
 
-        <div ref={databaseRef} className={laneClass}>
+        <div ref={databaseRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>Persistência</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>Supabase / PostgreSQL (RLS + criptografia)</p>
@@ -151,7 +151,7 @@ export default function Figure06_ArquiteturaLogica() {
           </article>
         </div>
 
-        <div ref={apiRef} className={laneClass}>
+        <div ref={apiRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>APIs</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>Rotas serverless (Next.js)</p>
@@ -168,7 +168,7 @@ export default function Figure06_ArquiteturaLogica() {
           </article>
         </div>
 
-        <div ref={panelRef} className={laneClass}>
+        <div ref={panelRef} className={laneClass} data-export="lane">
           <p className={laneLabelClass}>Painel</p>
           <article className={cardClass}>
             <p className={cardTitleClass}>Aplicação Next.js (App Router, `/dashboard`, `/tools`)</p>
@@ -202,7 +202,7 @@ export default function Figure06_ArquiteturaLogica() {
           { id: "db-api", d: pathDbToApi },
           { id: "api-panel", d: pathApiToPanel },
         ]
-          .filter((item) => item.d)
+          .filter((item): item is { id: string; d: string } => typeof item.d === "string")
           .map((item) => (
             <path
               key={item.id}

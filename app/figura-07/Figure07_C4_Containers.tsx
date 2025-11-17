@@ -68,8 +68,8 @@ export default function Figure07_C4_Containers() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_2fr]">
-        <div className={boundaryClass}>
+      <div className="grid gap-6 lg:grid-cols-[1.2fr_2fr]" data-export="lane">
+        <div className={boundaryClass} data-export="lane">
           <span className={boundaryLabelClass}>Zona externa</span>
           <article className={cardClass} ref={sourcesCardRef}>
             <p className={cardTitleClass}>Fontes FTP / APIs</p>
@@ -83,7 +83,7 @@ export default function Figure07_C4_Containers() {
           </article>
         </div>
 
-        <div className={boundaryClass}>
+        <div className={boundaryClass} data-export="lane">
           <span className={`${boundaryLabelClass} left-6`}>Backend Redeagromet</span>
           <div className="grid gap-4 md:grid-cols-2">
             <article className={`${cardClass} col-span-2`} ref={ingestionCardRef}>
@@ -145,7 +145,7 @@ export default function Figure07_C4_Containers() {
         </div>
       </div>
 
-      <div className={`${boundaryClass} border-dashed`}>
+      <div className={`${boundaryClass} border-dashed`} data-export="lane">
         <span className={boundaryLabelClass}>Frontend (Next.js)</span>
         <article className={cardClass} ref={appCardRef}>
           <p className={cardTitleClass}>Aplicação Next.js (`/dashboard`, `/tools`)</p>
@@ -185,7 +185,9 @@ export default function Figure07_C4_Containers() {
           { id: "storage-api", d: pathStorageToApi, color: COLORS.flowData, marker: "fig7ArrowData" },
           { id: "api-app", d: pathApiToApp, color: COLORS.flowApi, marker: "fig7ArrowApi" },
         ]
-          .filter((connector) => connector.d)
+          .filter(
+            (connector): connector is { id: string; d: string; color: string; marker: string } => typeof connector.d === "string",
+          )
           .map((connector) => (
             <path
               key={connector.id}

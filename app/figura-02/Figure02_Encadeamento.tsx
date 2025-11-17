@@ -13,6 +13,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 import {
   BarChart3,
   CloudRain,
@@ -212,6 +214,53 @@ export const exportAsSVG = (svgRef: ExportableSVG, name: string) => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+/**
+ * Captures a live DOM node (e.g., a Leaflet map) as a high-DPI PNG and embeds it into a 1:1
+ * PDF page so the exported document matches the on-screen framing. Used when rebuilding a
+ * fully vector snapshot would diverge from the rendered state.
+ */
+export const exportElementAsPngPDF = async (
+  elementRef: ExportContainer,
+  name: string,
+  options?: { scale?: number },
+) => {
+  const element = elementRef.current;
+  if (!element) return;
+
+  const scale = options?.scale ?? Math.min(3, window.devicePixelRatio || 1);
+  const canvas = await html2canvas(element, {
+    scale,
+    useCORS: true,
+    logging: false,
+    backgroundColor: null,
+    // html2canvas cannot parse modern color() / color-mix() in oklab;
+    // strip those Tailwind base rules from the cloned document before rasterizing.
+    onclone: (clonedDoc) => {
+      clonedDoc
+        .querySelectorAll<HTMLStyleElement>('style')
+        .forEach((styleEl) => {
+          if (styleEl.textContent && styleEl.textContent.includes('oklab')) {
+            styleEl.parentElement?.removeChild(styleEl);
+          }
+        });
+    },
+  });
+
+  const width = canvas.width || 1;
+  const height = canvas.height || 1;
+  const pngData = canvas.toDataURL('image/png');
+
+  const pdf = new jsPDF({
+    orientation: width >= height ? 'l' : 'p',
+    unit: 'px',
+    format: [width, height],
+    compress: true,
+  });
+
+  pdf.addImage(pngData, 'PNG', 0, 0, width, height, undefined, 'FAST');
+  pdf.save(name);
 };
 
 // Export a vector PDF containing only the diagram (SVG) and a vector caption (no title/header UI)

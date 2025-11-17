@@ -146,7 +146,13 @@ export default function Figure11_SazonalidadeET0() {
         </div>
       </div>
 
-      <svg ref={svgRef} viewBox={`0 0 ${dims.width} ${dims.height}`} className="mt-8 w-full" role="img">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${dims.width} ${dims.height}`}
+        className="mt-8 w-full"
+        data-export="lane"
+        role="img"
+      >
         <rect
           x={dims.padding.left}
           y={dims.padding.top}

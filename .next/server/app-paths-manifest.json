@@ -1,5 +1,16 @@
 {
   "/api/export-figura02/route": "app/api/export-figura02/route.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
-  "/figura-05/page": "app/figura-05/page.js"
+  "/fig-pipelineconceitual/page": "app/fig-pipelineconceitual/page.js",
+  "/figura-05/page": "app/figura-05/page.js",
+  "/figura-06/page": "app/figura-06/page.js",
+  "/figura-07/page": "app/figura-07/page.js",
+  "/figura-08/page": "app/figura-08/page.js",
+  "/figura-09/page": "app/figura-09/page.js",
+  "/figura-10/page": "app/figura-10/page.js",
+  "/figura-11/page": "app/figura-11/page.js",
+  "/figura-12/page": "app/figura-12/page.js",
+  "/figura-13/page": "app/figura-13/page.js",
+  "/figura-14/page": "app/figura-14/page.js",
+  "/page": "app/page.js"
 }

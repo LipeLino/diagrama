@@ -2,11 +2,11 @@
 
 import "leaflet/dist/leaflet.css";
 
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { LatLngBoundsExpression, LatLngTuple, Map as LeafletMap } from "leaflet";
 
 import { TRIANGULO_STATES, TRIANGULO_HULL, TRIANGULO_BOUNDS, type LatLon } from "../../data/geo/trianguloMapData";
-import { exportAsSVG, exportDiagramPDF } from "../figura-02/Figure02_Encadeamento";
+import { exportAsSVG, exportDiagramPDF, exportElementAsPngPDF } from "../figura-02/Figure02_Encadeamento";
 import type { StationMetadata } from "../../types/figureModels";
 
 const COLORS = {
@@ -43,7 +43,7 @@ type TooltipDirection = "top" | "bottom" | "left" | "right";
 
 const DEFAULT_TOOLTIP_OFFSET: [number, number] = [0, -10];
 const STATION_TOOLTIP_OVERRIDES: Record<string, { direction: TooltipDirection; offset?: [number, number] }> = {
-  frutal: { direction: "right", offset: [18, 10] },
+  frutal: { direction: "right", offset: [18, 0] },
   frutalSigma: { direction: "left", offset: [-18, -26] },
   aparecida: { direction: "bottom", offset: [0, 14] },
   planura: { direction: "bottom", offset: [0, 16] },
@@ -120,7 +120,7 @@ const providerColor = (provider: string) => {
 const basemapAttribution = "Fonte do mosaico: Esri, Maxar, Earthstar Geographics";
 const basemapUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
-const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] }) => {
+const LeafletStationsMap = ({ stationsList, exportRef }: { stationsList: StationMetadata[]; exportRef?: React.RefObject<HTMLDivElement | null> }) => {
   const [LeafletComponents, setLeafletComponents] = useState<typeof import("react-leaflet") | null>(null);
   const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
 
@@ -156,7 +156,7 @@ const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] 
   const { MapContainer, TileLayer, ZoomControl, ScaleControl, Polygon, CircleMarker } = LeafletComponents;
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={exportRef} className="relative h-full w-full">
       <MapContainer
         ref={(instance) => {
           if (instance) {
@@ -174,7 +174,7 @@ const LeafletStationsMap = ({ stationsList }: { stationsList: StationMetadata[] 
         className="h-full w-full rounded-[28px]"
         style={{ height: "100%", width: "100%" }}
       >
-        <TileLayer url={basemapUrl} attribution={basemapAttribution} detectRetina />
+        <TileLayer url={basemapUrl} attribution={basemapAttribution} detectRetina crossOrigin />
         <ZoomControl position="topright" />
         <ScaleControl position="bottomleft" />
 
@@ -388,7 +388,33 @@ const useSvgMapData = () => {
 export default function Figure05_LocalizacaoEstacoes() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const mapExportRef = useRef<HTMLDivElement | null>(null);
   const { mapNodes, stationCards, statesWithPaths, trianguloHullPath, trianguloLabel, gridLines, scaleBar } = useSvgMapData();
+
+  const handleExportMapPDF = useCallback(async () => {
+    const root = mapExportRef.current;
+    if (!root) return;
+
+    const tiles = Array.from(root.querySelectorAll("img.leaflet-tile")) as HTMLImageElement[];
+    await Promise.all(
+      tiles.map((tile) => {
+        if (tile.complete && tile.naturalWidth > 0) {
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+          const cleanup = () => {
+            tile.removeEventListener("load", cleanup);
+            tile.removeEventListener("error", cleanup);
+            resolve();
+          };
+          tile.addEventListener("load", cleanup);
+          tile.addEventListener("error", cleanup);
+        });
+      }),
+    );
+
+    await exportElementAsPngPDF(mapExportRef, "Figura05_Mapa.pdf", { scale: 2 });
+  }, []);
 
   return (
     <section ref={containerRef} className="relative rounded-3xl border border-[#d1d9e0] bg-white p-6 shadow-xl" aria-label="Figura 5 – Localização das estações Redeagromet" data-figure="5">
@@ -403,7 +429,8 @@ export default function Figure05_LocalizacaoEstacoes() {
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-lg border-2 border-[#1565c0] bg-white px-4 py-2 text-sm font-semibold text-[#0f2747] shadow-sm transition hover:bg-[#f5f5f5]"
-          onClick={() => void exportDiagramPDF(svgRef, containerRef, "Figura05_Mapa.pdf")}
+          onClick={() => void handleExportMapPDF()}
+          title="Exporta exatamente o enquadramento atual do mapa (PNG incorporado em PDF)."
         >
           Exportar PDF
         </button>
@@ -411,7 +438,7 @@ export default function Figure05_LocalizacaoEstacoes() {
 
       <div className="mt-12 rounded-[36px] border border-[#c8d7ea] bg-linear-to-b from-[#dfe8ff] via-[#f5f8ff] to-white p-4 shadow-inner">
         <div className="relative h-[1020px] w-full overflow-hidden rounded-4xl border border-[#b8c8de] bg-[#0b1a2b]">
-          <LeafletStationsMap stationsList={stations} />
+          <LeafletStationsMap stationsList={stations} exportRef={mapExportRef} />
 
           <div className="pointer-events-none absolute left-6 top-6 z-1000 rounded-2xl border border-white/80 bg-white/95 px-6 py-4 text-[#0f2747] shadow-2xl backdrop-blur-md">
             <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#64748b]">Redeagromet</p>
@@ -697,6 +724,9 @@ export default function Figure05_LocalizacaoEstacoes() {
         }
         .station-overlay__card--sigma {
           transform: translateY(-20px);
+        }
+        .station-overlay__card--frutal {
+          transform: translateY(16px);
         }
         .station-overlay__card--frutal {
           transform: translateY(-10px);
